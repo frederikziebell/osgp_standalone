@@ -10,9 +10,16 @@ public class Main {
     public static void main(String[] args) {
         logger.info("Starting OSGP Standalone Reader...");
 
-        // Configurable parameters (Defaulting to /dev/ttyUSB0 and 9600 baud)
         String port = args.length > 0 ? args[0] : "/dev/ttyUSB0";
         int baud = args.length > 1 ? Integer.parseInt(args[1]) : 9600;
+        
+        // OSGP 128-bit Encryption & Authentication Keys (Hex formatted)
+        String encryptionKey = args.length > 2 ? args[2] : "";
+        String authenticationKey = args.length > 3 ? args[3] : "";
+
+        if (encryptionKey.isEmpty()) {
+            logger.warn("No OSGP Encryption Key provided. Running in unencrypted mode.");
+        }
 
         OsgpMeterReader reader = new OsgpMeterReader(port, baud);
         reader.connectAndRead();
