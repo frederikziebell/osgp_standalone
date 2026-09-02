@@ -8,20 +8,17 @@ public class Main {
     private static final Logger logger = LoggerFactory.getLogger(Main.class);
 
     public static void main(String[] args) {
-        logger.info("Starting OSGP Standalone Reader...");
+        logger.info("Starting Standalone Smart Meter Reader...");
 
         String port = args.length > 0 ? args[0] : "/dev/ttyUSB0";
         int baud = args.length > 1 ? Integer.parseInt(args[1]) : 9600;
-        
-        // OSGP 128-bit Encryption & Authentication Keys (Hex formatted)
-        String encryptionKey = args.length > 2 ? args[2] : "";
-        String authenticationKey = args.length > 3 ? args[3] : "";
+        String password = args.length > 2 ? args[2] : "";
 
-        if (encryptionKey.isEmpty()) {
-            logger.warn("No OSGP Encryption Key provided. Running in unencrypted mode.");
+        if (password.isEmpty()) {
+            logger.warn("No password provided. C12.18 LOGON step will be skipped.");
         }
 
-        OsgpMeterReader reader = new OsgpMeterReader(port, baud);
+        OsgpMeterReader reader = new OsgpMeterReader(port, baud, password);
         reader.connectAndRead();
     }
 }

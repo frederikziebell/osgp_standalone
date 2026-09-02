@@ -23,13 +23,6 @@
             <version>2.10.3</version>
         </dependency>
 
-        <!-- Cryptography library for AES-GCM / CMAC -->
-        <dependency>
-            <groupId>org.bouncycastle</groupId>
-            <artifactId>bcprov-jdk18on</artifactId>
-            <version>1.77</version>
-        </dependency>
-
         <!-- Simple console logger -->
         <dependency>
             <groupId>org.slf4j</groupId>
