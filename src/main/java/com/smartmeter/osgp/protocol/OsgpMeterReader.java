@@ -18,38 +18,46 @@ public class OsgpMeterReader {
 
     public OsgpMeterReader(String portName, int baudRate, String password) {
         this.portName = portName;
-        this.baudRate = baudRate;
+        this.baudRate = baudRate > 0 ? baudRate : 9600;
         this.password = password != null ? password : "";
     }
 
     public boolean connectAndRead() {
-        logger.info("Opening serial port: {}", portName);
+        logger.info("Opening serial port: {} at {} baud", portName, baudRate);
         serialPort = SerialPort.getCommPort(portName);
-        serialPort.setBaudRate(300); // ANSI C12.18 optical initial handshake rate
+        
+        // Exact serial port config matching openHAB smartmeterosgp binding
+        serialPort.setBaudRate(baudRate);
         serialPort.setNumDataBits(8);
         serialPort.setNumStopBits(1);
-        serialPort.setParity(SerialPort.NO_PARITY);
-        serialPort.setComPortTimeouts(SerialPort.TIMEOUT_READ_BLOCKING, 2000, 0);
+        serialPort.setParity(SerialPort.EVEN_PARITY); // EVEN PARITY is required for OSGP C12.18 optical ports!
+        serialPort.setComPortTimeouts(SerialPort.TIMEOUT_READ_BLOCKING, 3000, 0);
 
         if (!serialPort.openPort()) {
             logger.error("Failed to open serial port {}", portName);
             return false;
         }
 
-        try {
-            logger.info("Port opened. Sending C12.18 Identification (IDENT)...");
-            if (!performIdentification()) {
-                logger.error("C12.18 Identification failed.");
-                return false;
-            }
+        // Power the optical probe transceiver circuit
+        serialPort.setDTR();
+        serialPort.setRTS();
 
-            if (baudRate > 300) {
-                logger.info("Negotiating baud rate shift to {}...", baudRate);
-                if (negotiateBaudRate(baudRate)) {
-                    serialPort.setBaudRate(baudRate);
-                    logger.info("Baud rate switched to {}", baudRate);
+        try {
+            // Wake up optical receiver
+            wakeUpOpticalPort();
+
+            logger.info("Sending C12.18 Identification (IDENT)...");
+            if (!performIdentification()) {
+                logger.warn("IDENT failed with EVEN parity. Retrying with NO parity...");
+                serialPort.setParity(SerialPort.NO_PARITY);
+                wakeUpOpticalPort();
+                if (!performIdentification()) {
+                    logger.error("C12.18 Identification failed on both parity settings.");
+                    return false;
                 }
             }
+
+            logger.info("IDENT acknowledged by meter!");
 
             if (!password.isEmpty()) {
                 logger.info("Sending C12.18 LOGON with password...");
@@ -75,7 +83,15 @@ public class OsgpMeterReader {
         }
     }
 
+    private void wakeUpOpticalPort() throws InterruptedException {
+        // Preamble 0x55 / 0xEE to trigger optical phototransistor AGC
+        byte[] wakeup = new byte[]{ (byte) 0xEE, (byte) 0xEE };
+        serialPort.writeBytes(wakeup, wakeup.length);
+        Thread.sleep(150); // Give the optical head 150ms to wake up
+    }
+
     private boolean performIdentification() {
+        // C12.18 IDENT service request (0xEE) frame
         byte[] identPacket = new byte[]{ (byte) 0xEE, 0x00, 0x00, 0x00, 0x00, 0x00 };
         int crc = CRC16.calculate(identPacket, CRC16.Polynom.CRC16_CCITT, 0);
         
@@ -89,24 +105,7 @@ public class OsgpMeterReader {
         byte[] response = new byte[10];
         int read = serialPort.readBytes(response, response.length);
         
-        return read > 0 && response[0] == C1218Constants.OK;
-    }
-
-    private boolean negotiateBaudRate(int targetBaud) {
-        C1218Constants.C1218Baudrate baudEnum = C1218Constants.C1218Baudrate.fromRate(targetBaud);
-        byte[] negoPacket = new byte[]{ (byte) 0x21, baudEnum.getCode(), 0x00, 0x00 };
-        int crc = CRC16.calculate(negoPacket, CRC16.Polynom.CRC16_CCITT, 0);
-
-        byte[] fullFrame = new byte[6];
-        System.arraycopy(negoPacket, 0, fullFrame, 0, 4);
-        fullFrame[4] = (byte) (crc & 0xFF);
-        fullFrame[5] = (byte) ((crc >> 8) & 0xFF);
-
-        serialPort.writeBytes(fullFrame, fullFrame.length);
-
-        byte[] response = new byte[5];
-        int read = serialPort.readBytes(response, response.length);
-        return read > 0 && response[0] == C1218Constants.OK;
+        return read > 0 && (response[0] == C1218Constants.OK || response[0] == (byte) 0x00);
     }
 
     private boolean performLogon(String pass) {
@@ -120,7 +119,7 @@ public class OsgpMeterReader {
             if (i < passBytes.length) {
                 logonPacket[3 + i] = passBytes[i];
             } else {
-                logonPacket[3 + i] = 0x20; // ASCII space padding
+                logonPacket[3 + i] = 0x20; // Space padding
             }
         }
 
@@ -136,7 +135,7 @@ public class OsgpMeterReader {
         byte[] response = new byte[5];
         int read = serialPort.readBytes(response, response.length);
 
-        return read > 0 && response[0] == C1218Constants.OK;
+        return read > 0 && (response[0] == C1218Constants.OK || response[0] == (byte) 0x00);
     }
 
     private void readTable23EnergyData() {
@@ -160,7 +159,7 @@ public class OsgpMeterReader {
             return;
         }
 
-        if (rawResponse[0] != C1218Constants.OK) {
+        if (rawResponse[0] != C1218Constants.OK && rawResponse[0] != 0x00) {
             logger.error("Meter returned response code {} for Table 23 read.", rawResponse[0]);
             return;
         }
