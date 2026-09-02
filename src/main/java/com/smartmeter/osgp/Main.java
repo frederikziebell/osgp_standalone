@@ -19,6 +19,6 @@ public class Main {
         }
 
         OsgpMeterReader reader = new OsgpMeterReader(port, baud, password);
-        reader.connectAndRead();
+        reader.start();
     }
 }
