@@ -1,4 +1,5 @@
 com/smartmeter/osgp/protocol/C1218Constants.class
+com/smartmeter/osgp/protocol/OsgpMeterReader.class
 com/smartmeter/osgp/Main.class
 com/smartmeter/osgp/protocol/CRC16$Polynom.class
 com/smartmeter/osgp/protocol/CRC16.class
