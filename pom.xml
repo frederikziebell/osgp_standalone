@@ -32,8 +32,13 @@
     </dependencies>
 
     <build>
+        <!-- Fixes the output jar name to osgp-standalone.jar instead of
+             osgp-standalone-1.0.0-SNAPSHOT.jar, so run.sh doesn't need to
+             know the version number. -->
+        <finalName>osgp-standalone</finalName>
         <plugins>
-            <!-- Maven Exec Plugin to easily run via CLI -->
+            <!-- Maven Exec Plugin: lets you run without building a jar first,
+                 e.g. `mvn exec:java -Dexec.args=config.properties` -->
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>exec-maven-plugin</artifactId>
@@ -41,6 +46,30 @@
                 <configuration>
                     <mainClass>com.smartmeter.osgp.Main</mainClass>
                 </configuration>
+            </plugin>
+
+            <!-- Maven Shade Plugin: bundles jSerialComm + slf4j into a single
+                 runnable jar (target/osgp-standalone.jar), so the Pi only
+                 needs a JRE to run it - no Maven, no separate dependency jars. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.5.1</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>com.smartmeter.osgp.Main</mainClass>
+                                </transformer>
+                            </transformers>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>
