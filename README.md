@@ -1,0 +1,87 @@
+# OSGP standalone meter reader — Python port
+
+Python 3 port of the standalone Java tool, which itself ports the protocol logic from the
+openHAB `smartmeterosgp` binding. Same wire protocol, same defaults, same config file
+format — just no JVM.
+
+## Install on a Raspberry Pi
+
+```bash
+sudo apt install python3-serial      # or: python3 -m pip install -r requirements.txt
+sudo usermod -a -G dialout $USER     # needed once for /dev/ttyUSB0 access; log out and back in
+cp config.properties.example config.properties
+nano config.properties               # set your 20-character meter password
+./run.sh
+```
+
+`./run.sh` picks up `venv/bin/python3` if you'd rather use a virtualenv. You can also run
+it directly:
+
+```bash
+python3 main.py config.properties
+```
+
+Ctrl+C (or `systemctl stop`) triggers a clean LOGOFF/TERMINATE before exiting.
+
+## Files
+
+| File | Ported from |
+| --- | --- |
+| `main.py` | `Main.java` |
+| `meter_reader.py` | `OsgpMeterReader.java` |
+| `c1218.py` | `C1218Constants.java` |
+| `crc16.py` | `CRC16.java` |
+| `tests/` | new — see below |
+
+## Config
+
+Identical to the Java version's `config.properties`, plus one optional key:
+
+- `logLevel` — `ERROR`, `WARNING`, `INFO` (default), `DEBUG` or `TRACE`. This is the
+  equivalent of the Java version's `-Dorg.slf4j.simpleLogger.defaultLogLevel` system
+  property; `TRACE` logs every frame on the wire. Use it if the meter doesn't respond.
+
+## Deliberate differences from the Java version
+
+Everything on the wire is byte-for-byte identical. These are the only behavioural changes,
+all of them in the "the Java version would have crashed or misbehaved here" category:
+
+1. **Truncated replies no longer kill the process.** Java's `ByteBuffer` throws an
+   unchecked `BufferUnderflowException` if a reply is shorter than the parser expects,
+   which would take down the whole program. Here it raises `BufferUnderflow`, which is
+   caught, logged as a warning, and treated as a failed read cycle. A frame shorter than
+   its 6-byte header is NACKed instead of parsed from garbage.
+2. **Shutdown actually completes the logoff.** Java's shutdown hook sets the stop flag and
+   returns, after which the JVM may exit while the main thread is still inside a
+   `Thread.sleep`, skipping the `finally` block that logs off. Here `SIGINT`/`SIGTERM` set
+   a `threading.Event` that also interrupts the long between-poll sleeps, so the
+   LOGOFF/TERMINATE exchange reliably runs. The short in-protocol delays (10/20/80 ms) are
+   deliberately *not* interruptible, so a shutdown can't cut a frame exchange in half.
+3. **Session age uses a monotonic clock** instead of wall-clock time, so an NTP step can't
+   make the session look hours old (or never expire).
+4. **`idleStartTime` is parsed once at startup**, so a malformed value is reported
+   immediately rather than throwing on the first poll cycle.
+5. `logLevel` in the config file, as described above.
+
+Two Java quirks were kept on purpose because they're part of the behaviour that's already
+confirmed working against a real meter:
+
+- The received-frame payload is taken as `frame[6:len(frame)-2]` rather than
+  `frame[6:6+declared_length]`. These are the same for a well-formed frame.
+- Table 28's declared length is read big-endian, before the meter's own byte order from
+  Table 0 is applied to the value fields.
+
+## Tests
+
+No hardware or `pyserial` needed — the suite injects a fake `serial` module backed by a
+simulated C12.18 meter.
+
+```bash
+python3 tests/test_port.py        # 25 unit tests
+python3 tests/run_integration.py  # full session against the simulated meter (~7s)
+```
+
+Coverage includes the CRC-16/X-25 check value, exact request-payload bytes for
+NEGOTIATE/LOGON/SECURITY/READ/READ-PARTIAL, the control-byte toggle, NACK-and-retry on a
+bad CRC, multi-packet reassembly, both meter byte orders, the midnight-wrapping idle
+window, and `.properties` parsing.
