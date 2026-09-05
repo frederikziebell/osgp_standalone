@@ -9,8 +9,12 @@ to localhost and reach it over an SSH tunnel / VPN instead.
 
 import json
 import logging
+import sqlite3
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlsplit
+
+from history import RANGE_PRESETS, query_range_preset
 
 logger = logging.getLogger("Dashboard")
 
@@ -87,6 +91,40 @@ DASHBOARD_HTML = """<!doctype html>
   .tile .value .unit { font-size: 13px; font-weight: 500; color: var(--text-2); margin-left: 4px; }
   .section-title { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 24px 0 10px; }
   footer { margin-top: 24px; font-size: 12px; color: var(--muted); }
+
+  .chart-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    margin-top: 24px;
+  }
+  .chart-controls { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
+  .chart-controls select {
+    font: inherit; font-size: 13px; color: var(--text); background: var(--page);
+    border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px;
+  }
+  .range-buttons { display: flex; gap: 4px; }
+  .range-buttons button {
+    font: inherit; font-size: 13px; color: var(--text-2); background: transparent;
+    border: 1px solid var(--border); border-radius: 6px; padding: 6px 12px; cursor: pointer;
+  }
+  .range-buttons button.active { color: var(--text); background: var(--page); border-color: var(--accent); }
+  .chart-svg-wrap { position: relative; }
+  .chart-svg-wrap svg { display: block; width: 100%; height: 260px; overflow: visible; }
+  .chart-gridline { stroke: var(--border); stroke-width: 1; }
+  .chart-axis-label { fill: var(--muted); font-size: 11px; }
+  .chart-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .chart-area { fill: var(--accent); opacity: 0.10; }
+  .chart-crosshair { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; }
+  .chart-dot { fill: var(--accent); stroke: var(--surface); stroke-width: 2; }
+  .chart-empty { fill: var(--muted); font-size: 13px; }
+  .chart-tooltip {
+    position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 10px; font-size: 12px; color: var(--text); white-space: nowrap;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15); transform: translate(-50%, -110%);
+  }
+  .chart-tooltip .t-time { color: var(--text-2); }
 </style>
 </head>
 <body>
@@ -129,6 +167,22 @@ DASHBOARD_HTML = """<!doctype html>
   </div>
 
   <footer id="footer">Waiting for first reading&hellip;</footer>
+
+  <div class="chart-card">
+    <div class="chart-controls">
+      <select id="metric-select"></select>
+      <div class="range-buttons" id="range-buttons">
+        <button data-range="24h" class="active">24h</button>
+        <button data-range="week">Week</button>
+        <button data-range="month">Month</button>
+        <button data-range="year">Year</button>
+      </div>
+    </div>
+    <div class="chart-svg-wrap" id="chart-wrap">
+      <svg id="chart-svg" viewBox="0 0 800 260" preserveAspectRatio="none"></svg>
+      <div class="chart-tooltip" id="chart-tooltip" hidden></div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -195,6 +249,178 @@ function setStatus(good, text) {
 
 poll();
 setInterval(poll, 2000);
+
+// ---------------------------------------------------------------------
+// History chart - hand-drawn SVG line chart, no charting library needed.
+// ---------------------------------------------------------------------
+
+const METRICS = [
+  { field: "fwd_active_power_w", label: "Forward active power", unit: "W", digits: 0 },
+  { field: "rev_active_power_w", label: "Reverse active power", unit: "W", digits: 0 },
+  { field: "import_reactive_var", label: "Import reactive power", unit: "VAr", digits: 0 },
+  { field: "export_reactive_var", label: "Export reactive power", unit: "VAr", digits: 0 },
+  { field: "l1_current_a", label: "L1 current", unit: "A", digits: 2 },
+  { field: "l2_current_a", label: "L2 current", unit: "A", digits: 2 },
+  { field: "l3_current_a", label: "L3 current", unit: "A", digits: 2 },
+  { field: "l1_voltage_v", label: "L1 voltage", unit: "V", digits: 1 },
+  { field: "l2_voltage_v", label: "L2 voltage", unit: "V", digits: 1 },
+  { field: "l3_voltage_v", label: "L3 voltage", unit: "V", digits: 1 },
+  { field: "fwd_active_energy_wh", label: "Forward active energy", unit: "Wh", digits: 0 },
+  { field: "rev_active_energy_wh", label: "Reverse active energy", unit: "Wh", digits: 0 },
+];
+
+const metricSelect = document.getElementById("metric-select");
+for (const m of METRICS) {
+  const opt = document.createElement("option");
+  opt.value = m.field;
+  opt.textContent = m.label;
+  metricSelect.appendChild(opt);
+}
+
+let currentRange = "24h";
+let currentHistory = null;
+
+function rangeLabel(range, ts) {
+  const d = new Date(ts * 1000);
+  if (range === "24h") return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (range === "week") return d.toLocaleDateString([], { weekday: "short" }) + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (range === "year") return d.toLocaleDateString([], { month: "short", year: "2-digit" });
+  return d.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+async function loadHistory() {
+  try {
+    const res = await fetch("/api/history?range=" + encodeURIComponent(currentRange), { cache: "no-store" });
+    if (!res.ok) { currentHistory = null; drawChart(); return; }
+    currentHistory = await res.json();
+  } catch (e) {
+    currentHistory = null;
+  }
+  drawChart();
+}
+
+function drawChart() {
+  const svg = document.getElementById("chart-svg");
+  const W = 800, H = 260, padL = 46, padR = 10, padT = 14, padB = 24;
+  svg.innerHTML = "";
+
+  const metric = METRICS.find(m => m.field === metricSelect.value) || METRICS[0];
+  const points = (currentHistory && currentHistory.points || [])
+    .filter(p => p[metric.field] !== null && p[metric.field] !== undefined);
+
+  if (!currentHistory || points.length < 2) {
+    const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    text.setAttribute("x", W / 2);
+    text.setAttribute("y", H / 2);
+    text.setAttribute("text-anchor", "middle");
+    text.setAttribute("class", "chart-empty");
+    text.textContent = "Not enough history yet for this view";
+    svg.appendChild(text);
+    return;
+  }
+
+  const xs = points.map(p => p.bucket_ts);
+  const ys = points.map(p => p[metric.field]);
+  const minX = xs[0], maxX = xs[xs.length - 1];
+  let minY = Math.min(...ys), maxY = Math.max(...ys);
+  if (minY === maxY) { minY -= 1; maxY += 1; }
+  const yPad = (maxY - minY) * 0.08;
+  minY -= yPad; maxY += yPad;
+
+  const xScale = x => padL + (W - padL - padR) * (x - minX) / (maxX - minX);
+  const yScale = y => padT + (H - padT - padB) * (1 - (y - minY) / (maxY - minY));
+
+  const ns = "http://www.w3.org/2000/svg";
+  const addEl = (tag, attrs) => {
+    const el = document.createElementNS(ns, tag);
+    for (const k in attrs) el.setAttribute(k, attrs[k]);
+    svg.appendChild(el);
+    return el;
+  };
+
+  // Horizontal gridlines + y-axis labels (4 bands).
+  const bands = 4;
+  for (let i = 0; i <= bands; i++) {
+    const y = minY + (maxY - minY) * i / bands;
+    const yPix = yScale(y);
+    addEl("line", { x1: padL, x2: W - padR, y1: yPix, y2: yPix, class: "chart-gridline" });
+    addEl("text", { x: padL - 8, y: yPix + 4, "text-anchor": "end", class: "chart-axis-label" })
+      .textContent = fmt(y, metric.digits);
+  }
+
+  // x-axis labels (5 ticks).
+  const ticks = 5;
+  for (let i = 0; i <= ticks; i++) {
+    const x = minX + (maxX - minX) * i / ticks;
+    addEl("text", { x: xScale(x), y: H - 4, "text-anchor": i === 0 ? "start" : (i === ticks ? "end" : "middle"), class: "chart-axis-label" })
+      .textContent = rangeLabel(currentRange, x);
+  }
+
+  // Area + line.
+  const linePath = points.map((p, i) => (i === 0 ? "M" : "L") + xScale(p.bucket_ts) + "," + yScale(p[metric.field])).join(" ");
+  const areaPath = linePath + ` L${xScale(maxX)},${yScale(minY)} L${xScale(minX)},${yScale(minY)} Z`;
+  addEl("path", { d: areaPath, class: "chart-area" });
+  addEl("path", { d: linePath, class: "chart-line" });
+
+  // Hover layer: an invisible full-height rect capturing mousemove, plus a
+  // crosshair line and dot that get repositioned to the nearest point.
+  const crosshair = addEl("line", { x1: 0, x2: 0, y1: padT, y2: H - padB, class: "chart-crosshair" });
+  crosshair.style.display = "none";
+  const dot = addEl("circle", { r: 4, class: "chart-dot" });
+  dot.style.display = "none";
+  const hitRect = addEl("rect", { x: padL, y: padT, width: W - padL - padR, height: H - padT - padB, fill: "transparent" });
+
+  const tooltip = document.getElementById("chart-tooltip");
+  const wrap = document.getElementById("chart-wrap");
+
+  function pointerToIndex(clientX) {
+    const rect = svg.getBoundingClientRect();
+    const frac = (clientX - rect.left) / rect.width;
+    const x = minX + (maxX - minX) * frac;
+    let closest = 0, best = Infinity;
+    for (let i = 0; i < points.length; i++) {
+      const d = Math.abs(points[i].bucket_ts - x);
+      if (d < best) { best = d; closest = i; }
+    }
+    return closest;
+  }
+
+  hitRect.addEventListener("mousemove", (ev) => {
+    const i = pointerToIndex(ev.clientX);
+    const p = points[i];
+    const xPix = xScale(p.bucket_ts), yPix = yScale(p[metric.field]);
+    crosshair.setAttribute("x1", xPix); crosshair.setAttribute("x2", xPix);
+    crosshair.style.display = "";
+    dot.setAttribute("cx", xPix); dot.setAttribute("cy", yPix);
+    dot.style.display = "";
+
+    const wrapRect = wrap.getBoundingClientRect();
+    const svgRect = svg.getBoundingClientRect();
+    tooltip.style.left = (svgRect.left - wrapRect.left + (xPix / W) * svgRect.width) + "px";
+    tooltip.style.top = (svgRect.top - wrapRect.top + (yPix / H) * svgRect.height) + "px";
+    tooltip.innerHTML = fmt(p[metric.field], metric.digits) + " " + metric.unit +
+      '<br><span class="t-time">' + new Date(p.bucket_ts * 1000).toLocaleString() + "</span>";
+    tooltip.hidden = false;
+  });
+  hitRect.addEventListener("mouseleave", () => {
+    crosshair.style.display = "none";
+    dot.style.display = "none";
+    tooltip.hidden = true;
+  });
+}
+
+metricSelect.addEventListener("change", drawChart);
+document.getElementById("range-buttons").addEventListener("click", (ev) => {
+  const btn = ev.target.closest("button[data-range]");
+  if (!btn) return;
+  for (const b of document.querySelectorAll("#range-buttons button")) b.classList.remove("active");
+  btn.classList.add("active");
+  currentRange = btn.dataset.range;
+  loadHistory();
+});
+
+loadHistory();
+setInterval(loadHistory, 60000);
 </script>
 </body>
 </html>
@@ -207,13 +433,33 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
     server_version = "OsgpDashboard/1.0"
 
     def do_GET(self):
-        if self.path in ("/", "/index.html"):
+        parsed = urlsplit(self.path)
+        if parsed.path in ("/", "/index.html"):
             self._send(200, _DASHBOARD_HTML_BYTES, "text/html; charset=utf-8")
-        elif self.path == "/api/live":
+        elif parsed.path == "/api/live":
             body = json.dumps(self.server.reader.get_snapshot()).encode("utf-8")
             self._send(200, body, "application/json")
+        elif parsed.path == "/api/history":
+            self._handle_history(parse_qs(parsed.query))
         else:
             self._send(404, b"Not found", "text/plain; charset=utf-8")
+
+    def _handle_history(self, query):
+        db_path = getattr(self.server, "history_db_path", None)
+        if not db_path:
+            self._send(404, b'{"error": "history logging is disabled"}', "application/json")
+            return
+        range_name = query.get("range", ["24h"])[0]
+        if range_name not in RANGE_PRESETS:
+            self._send(400, b'{"error": "invalid range"}', "application/json")
+            return
+        try:
+            result = query_range_preset(db_path, range_name)
+        except sqlite3.Error as e:
+            logger.warning("History query failed: %s", e)
+            self._send(500, b'{"error": "query failed"}', "application/json")
+            return
+        self._send(200, json.dumps(result).encode("utf-8"), "application/json")
 
     def _send(self, status, body, content_type):
         self.send_response(status)
@@ -229,9 +475,10 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
 class DashboardServer:
     """Runs the HTTP server on a background daemon thread."""
 
-    def __init__(self, reader, bind_address, port):
+    def __init__(self, reader, bind_address, port, history_db_path=None):
         self._httpd = ThreadingHTTPServer((bind_address, port), _DashboardRequestHandler)
         self._httpd.reader = reader
+        self._httpd.history_db_path = history_db_path
         self._thread = threading.Thread(target=self._httpd.serve_forever,
                                         name="Dashboard", daemon=True)
 

@@ -62,6 +62,30 @@ readings — so either trust your LAN, set `webBind=127.0.0.1` and reach it over
 tunnel/VPN instead, or set `webEnabled=false` to turn it off entirely. See
 `config.properties.example` for the `web*` keys.
 
+### History and charts
+
+The dashboard also has a history chart (24h / week / month / year, switchable per
+metric) backed by a single SQLite file (`history.sqlite3` by default) — no separate
+database server. A row is logged once a minute (`historySampleSeconds`), independent of
+how often the meter itself is polled: logging every poll (every 2s by default) would be
+~15M rows/year for no real benefit, while once-a-minute is ~525k rows/year (tens of MB)
+and every chart range query still comes back in well under a second, even after years of
+accumulated history — queries only ever scan the rows inside the requested window, not
+the whole table.
+
+To keep the file bounded over many years without losing the shape of old data, once a
+calendar year becomes more than a year old its rows are automatically consolidated from
+1-minute to 5-minute resolution (checked once a day; safe to run more than once). For
+example, once 2027 starts, 2025 gets coarsened — 2026 stays at full 1-minute resolution
+for another year, since it isn't a full year old yet. This is a one-way operation: the
+underlying 1-minute detail for that year is gone afterwards, just like the classic
+RRDtool/Graphite/Prometheus approach to bounding long-term monitoring storage, but
+implemented as a couple of plain SQL statements in `history.py` instead of a separate
+round-robin-database engine.
+
+Set `historyEnabled=false` to turn logging off entirely (the live dashboard still
+works without it).
+
 ## Files
 
 | File | Ported from |
@@ -71,6 +95,7 @@ tunnel/VPN instead, or set `webEnabled=false` to turn it off entirely. See
 | `c1218.py` | `C1218Constants.java` |
 | `crc16.py` | `CRC16.java` |
 | `dashboard.py` | new — LAN live-readings dashboard |
+| `history.py` | new — SQLite history logging, coarsening, and chart queries |
 | `service.sh` | new — systemd service install/start/stop/restart/uninstall |
 | `tests/` | new — see below |
 

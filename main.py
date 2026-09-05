@@ -115,6 +115,9 @@ def main():
     web_enabled = props.get("webEnabled", "true").strip().lower() not in ("false", "0", "no")
     web_bind = props.get("webBind", "0.0.0.0").strip()
     web_port = parse_int(props, "webPort", 8080)
+    history_enabled = props.get("historyEnabled", "true").strip().lower() not in ("false", "0", "no")
+    history_db_path = props.get("historyDbPath", "history.sqlite3").strip()
+    history_sample_seconds = parse_int(props, "historySampleSeconds", 60)
 
     logger.info("Starting Standalone Smart Meter Reader (config: %s)...", config_path)
 
@@ -135,11 +138,19 @@ def main():
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
 
+    history_logger = None
+    if history_enabled:
+        from history import HistoryLogger
+        history_logger = HistoryLogger(reader, history_db_path, history_sample_seconds)
+        history_logger.start()
+
     dashboard_server = None
     if web_enabled:
         from dashboard import DashboardServer
         try:
-            dashboard_server = DashboardServer(reader, web_bind, web_port)
+            dashboard_server = DashboardServer(
+                reader, web_bind, web_port,
+                history_db_path=history_db_path if history_enabled else None)
             dashboard_server.start()
         except OSError as e:
             logger.error("Could not start dashboard web server on %s:%d: %s",
@@ -150,6 +161,8 @@ def main():
     finally:
         if dashboard_server is not None:
             dashboard_server.stop()
+        if history_logger is not None:
+            history_logger.stop()
 
 
 if __name__ == "__main__":

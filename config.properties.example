@@ -33,3 +33,13 @@ logLevel=INFO
 webEnabled=true
 webBind=0.0.0.0
 webPort=8080
+
+# History logging (powers the 24h/week/month/year charts on the dashboard). Stored in
+# a single SQLite file - no separate database server needed. One row is logged every
+# historySampleSeconds regardless of how often the meter itself is polled. Once a
+# calendar year is more than a year old (e.g. 2025 once 2027 starts), its per-minute
+# rows are automatically consolidated to 5-minute averages to keep the file small
+# long-term - see README.
+historyEnabled=true
+historyDbPath=history.sqlite3
+historySampleSeconds=60

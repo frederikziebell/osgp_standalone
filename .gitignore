@@ -112,3 +112,4 @@ venv.bak/
 
 # config
 config.properties
+*.sqlite3
