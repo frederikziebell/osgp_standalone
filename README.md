@@ -162,4 +162,15 @@ python3 tests/run_integration.py  # full session against the simulated meter (~7
 Coverage includes the CRC-16/X-25 check value, exact request-payload bytes for
 NEGOTIATE/LOGON/SECURITY/READ/READ-PARTIAL, the control-byte toggle, NACK-and-retry on a
 bad CRC, multi-packet reassembly, both meter byte orders, the midnight-wrapping idle
-window, and `.properties` parsing.
+window, and `.properties` parsing. `tests/test_history.py` covers the SQLite history
+logging, bucketed queries, and the year-coarsening logic the same way.
+
+Nothing runs these automatically on its own — there's no CI and no build step (this
+isn't a package with an install/build process; it's just scripts run directly). A
+tracked pre-commit hook is included (`githooks/pre-commit`) that runs all three before
+each commit and blocks it on failure; since git doesn't read hooks from a tracked
+directory by default, opt in once per clone with:
+
+```bash
+git config core.hooksPath githooks
+```

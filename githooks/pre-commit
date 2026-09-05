@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Runs the test suite before allowing a commit. Tracked in the repo (unlike .git/hooks/,
+# which isn't) so it travels with clones - each clone still needs to opt in once with:
+#   git config core.hooksPath githooks
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+# Prefer a local virtualenv, like run.sh/service.sh do.
+if [[ -x "venv/bin/python3" ]]; then
+    PYTHON="venv/bin/python3"
+else
+    PYTHON="python3"
+fi
+
+echo "pre-commit: running tests..."
+
+if ! "$PYTHON" tests/test_port.py; then
+    echo "pre-commit: unit tests failed - commit aborted." >&2
+    exit 1
+fi
+
+if ! "$PYTHON" tests/test_history.py; then
+    echo "pre-commit: history tests failed - commit aborted." >&2
+    exit 1
+fi
+
+if ! "$PYTHON" tests/run_integration.py > /dev/null; then
+    echo "pre-commit: integration test failed - commit aborted." >&2
+    exit 1
+fi
+
+echo "pre-commit: all tests passed."
