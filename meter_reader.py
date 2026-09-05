@@ -12,7 +12,7 @@ against this meter.
 import logging
 import threading
 import time
-from datetime import datetime, time as dtime
+from datetime import datetime, time as dtime, timezone
 
 import serial
 
@@ -295,7 +295,10 @@ class OsgpMeterReader:
         with self._state_lock:
             self._state["connected"] = ok
             if ok:
-                self._state["last_update"] = datetime.now().isoformat(timespec="seconds")
+                # Timezone-aware (explicit UTC offset) so the dashboard's JS - which parses an
+                # offset-less date-time string as *browser-local* time, not the reader's - can't
+                # misread this as being off by whatever the two clocks' zones differ by.
+                self._state["last_update"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
         return ok
 
     def _terminate_session(self):
