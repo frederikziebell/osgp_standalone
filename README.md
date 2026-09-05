@@ -86,6 +86,17 @@ round-robin-database engine.
 Set `historyEnabled=false` to turn logging off entirely (the live dashboard still
 works without it).
 
+### System health
+
+The dashboard also shows a small, muted CPU-load / memory / temperature readout next
+to the connection status dot — deliberately out of the way, since it's meant for
+spotting a problem (e.g. the Pi running hot in an enclosure), not for staring at.
+Numbers only turn orange/red if they cross a threshold (temp >70°C/80°C, load
+average > 1x/2x core count, memory >85%/95% used) — otherwise they stay small and
+grey. No dependency beyond the standard library: reads `/proc/meminfo`,
+`os.getloadavg()`, and `/sys/class/thermal/thermal_zone*/temp` (Linux/Raspberry Pi OS
+only).
+
 ## Files
 
 | File | Ported from |
@@ -96,6 +107,7 @@ works without it).
 | `crc16.py` | `CRC16.java` |
 | `dashboard.py` | new — LAN live-readings dashboard |
 | `history.py` | new — SQLite history logging, coarsening, and chart queries |
+| `sysinfo.py` | new — CPU load / memory / temperature stats for the dashboard |
 | `service.sh` | new — systemd service install/start/stop/restart/uninstall |
 | `tests/` | new — see below |
 

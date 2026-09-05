@@ -15,6 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
 from history import RANGE_PRESETS, query_range_preset
+from sysinfo import get_system_stats
 
 logger = logging.getLogger("Dashboard")
 
@@ -35,6 +36,7 @@ DASHBOARD_HTML = """<!doctype html>
     --border:    rgba(11,11,11,0.10);
     --accent:    #2a78d6;
     --good:      #0ca30c;
+    --warning:   #fab219;
     --critical:  #d03b3b;
   }
   @media (prefers-color-scheme: dark) {
@@ -61,10 +63,14 @@ DASHBOARD_HTML = """<!doctype html>
   .wrap { max-width: 900px; margin: 0 auto; padding: 24px 16px 48px; }
   header { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 20px; }
   h1 { font-size: 20px; font-weight: 600; margin: 0; }
+  .status-col { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
   .status { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-2); }
   .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
   .dot.good { background: var(--good); }
   .dot.critical { background: var(--critical); }
+  .sysinfo { font-size: 11px; color: var(--muted); }
+  .sysinfo .stat-warning { color: var(--warning); font-weight: 600; }
+  .sysinfo .stat-critical { color: var(--critical); font-weight: 700; }
   .hero {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -80,6 +86,11 @@ DASHBOARD_HTML = """<!doctype html>
     grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
     gap: 12px;
   }
+  /* Sections with a fixed triplet (Power/Current/Voltage: 3 tiles each) use a fixed
+     3-column grid instead of auto-fit - auto-fit wraps an odd tile count onto its own
+     half-empty row on narrow screens (2 tiles, then 1 alone), which looks broken on a
+     phone. Fixed columns just shrink each tile instead of ever wrapping. */
+  .grid-3 { grid-template-columns: repeat(3, 1fr); }
   .tile {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -89,6 +100,12 @@ DASHBOARD_HTML = """<!doctype html>
   .tile .label { font-size: 13px; color: var(--text-2); margin-bottom: 4px; }
   .tile .value { font-size: 22px; font-weight: 600; }
   .tile .value .unit { font-size: 13px; font-weight: 500; color: var(--text-2); margin-left: 4px; }
+  @media (max-width: 480px) {
+    .grid-3 { gap: 8px; }
+    .grid-3 .tile { padding: 10px; }
+    .grid-3 .tile .value { font-size: 17px; }
+    .grid-3 .tile .value .unit { font-size: 11px; margin-left: 2px; }
+  }
   .section-title { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 24px 0 10px; }
   footer { margin-top: 24px; font-size: 12px; color: var(--muted); }
 
@@ -131,7 +148,10 @@ DASHBOARD_HTML = """<!doctype html>
 <div class="wrap">
   <header>
     <h1>Smart Meter Live Dashboard</h1>
-    <div class="status"><span class="dot" id="dot"></span><span id="status-text">Loading...</span></div>
+    <div class="status-col">
+      <div class="status"><span class="dot" id="dot"></span><span id="status-text">Loading...</span></div>
+      <div class="sysinfo" id="sysinfo"></div>
+    </div>
   </header>
 
   <div class="hero">
@@ -140,21 +160,21 @@ DASHBOARD_HTML = """<!doctype html>
   </div>
 
   <div class="section-title">Power</div>
-  <div class="grid">
+  <div class="grid grid-3">
     <div class="tile"><div class="label">Reverse active power</div><div class="value" id="rev-power">&#8211;<span class="unit">W</span></div></div>
     <div class="tile"><div class="label">Import reactive power</div><div class="value" id="import-var">&#8211;<span class="unit">VAr</span></div></div>
     <div class="tile"><div class="label">Export reactive power</div><div class="value" id="export-var">&#8211;<span class="unit">VAr</span></div></div>
   </div>
 
   <div class="section-title">Current</div>
-  <div class="grid">
+  <div class="grid grid-3">
     <div class="tile"><div class="label">L1</div><div class="value" id="l1-a">&#8211;<span class="unit">A</span></div></div>
     <div class="tile"><div class="label">L2</div><div class="value" id="l2-a">&#8211;<span class="unit">A</span></div></div>
     <div class="tile"><div class="label">L3</div><div class="value" id="l3-a">&#8211;<span class="unit">A</span></div></div>
   </div>
 
   <div class="section-title">Voltage</div>
-  <div class="grid">
+  <div class="grid grid-3">
     <div class="tile"><div class="label">L1</div><div class="value" id="l1-v">&#8211;<span class="unit">V</span></div></div>
     <div class="tile"><div class="label">L2</div><div class="value" id="l2-v">&#8211;<span class="unit">V</span></div></div>
     <div class="tile"><div class="label">L3</div><div class="value" id="l3-v">&#8211;<span class="unit">V</span></div></div>
@@ -249,6 +269,50 @@ function setStatus(good, text) {
 
 poll();
 setInterval(poll, 2000);
+
+// ---------------------------------------------------------------------
+// System health - small, muted by default; only calls attention to itself
+// (color) when a value is actually out of the ordinary for a Pi.
+// ---------------------------------------------------------------------
+
+const TEMP_WARN_C = 70, TEMP_CRIT_C = 80;
+const MEM_WARN_PCT = 85, MEM_CRIT_PCT = 95;
+
+function severityClass(value, warnAt, critAt) {
+  if (value === null || value === undefined) return "";
+  if (value >= critAt) return "stat-critical";
+  if (value >= warnAt) return "stat-warning";
+  return "";
+}
+
+async function pollSystem() {
+  let data;
+  try {
+    const res = await fetch("/api/system", { cache: "no-store" });
+    data = await res.json();
+  } catch (e) {
+    return; // leave whatever was last shown - a failed system-stats fetch isn't worth alarming over
+  }
+
+  const parts = [];
+  if (data.temp_c !== null && data.temp_c !== undefined) {
+    const cls = severityClass(data.temp_c, TEMP_WARN_C, TEMP_CRIT_C);
+    parts.push(`<span class="${cls}">${data.temp_c.toFixed(1)}&deg;C</span>`);
+  }
+  if (data.cpu_load_1m !== null && data.cpu_load_1m !== undefined) {
+    const cores = data.cpu_count || 4;
+    const cls = severityClass(data.cpu_load_1m, cores, cores * 2);
+    parts.push(`<span class="${cls}">load ${data.cpu_load_1m.toFixed(2)}</span>`);
+  }
+  if (data.mem_percent !== null && data.mem_percent !== undefined) {
+    const cls = severityClass(data.mem_percent, MEM_WARN_PCT, MEM_CRIT_PCT);
+    parts.push(`<span class="${cls}">mem ${Math.round(data.mem_percent)}%</span>`);
+  }
+  document.getElementById("sysinfo").innerHTML = parts.join(" &middot; ");
+}
+
+pollSystem();
+setInterval(pollSystem, 5000);
 
 // ---------------------------------------------------------------------
 // History chart - hand-drawn SVG line chart, no charting library needed.
@@ -441,6 +505,8 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
             self._send(200, body, "application/json")
         elif parsed.path == "/api/history":
             self._handle_history(parse_qs(parsed.query))
+        elif parsed.path == "/api/system":
+            self._send(200, json.dumps(get_system_stats()).encode("utf-8"), "application/json")
         else:
             self._send(404, b"Not found", "text/plain; charset=utf-8")
 
