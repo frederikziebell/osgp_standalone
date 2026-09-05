@@ -23,6 +23,32 @@ python3 main.py config.properties
 
 Ctrl+C (or `systemctl stop`) triggers a clean LOGOFF/TERMINATE before exiting.
 
+## Running as a service
+
+To have it start on boot and restart on failure:
+
+```bash
+sudo ./service.sh install          # generates and enables the systemd unit
+sudo ./service.sh start
+sudo ./service.sh status           # or: journalctl -u osgp-meter-reader -f
+sudo ./service.sh stop
+sudo ./service.sh restart
+sudo ./service.sh uninstall
+```
+
+The generated unit runs `run.sh` directly out of **this checkout** — there's no
+separate copy-to-`/opt` step, so this directory becomes the live deployment once
+installed. That has one consequence: don't delete or move it while the service is
+installed.
+
+- To update: `git pull` here, then `sudo ./service.sh restart`.
+- To relocate or remove this checkout: `sudo ./service.sh uninstall` first, then
+  move/delete the directory (and `install` again from the new location if needed).
+
+`install` refuses to run as root directly (use `sudo` from the account that's in the
+`dialout` group) and refuses to take over a service that's already installed pointing
+at a *different* checkout, so a stray second clone can't silently hijack it.
+
 ## Live dashboard
 
 The reader also serves a live-readings dashboard over plain HTTP. With the default
@@ -45,6 +71,7 @@ tunnel/VPN instead, or set `webEnabled=false` to turn it off entirely. See
 | `c1218.py` | `C1218Constants.java` |
 | `crc16.py` | `CRC16.java` |
 | `dashboard.py` | new — LAN live-readings dashboard |
+| `service.sh` | new — systemd service install/start/stop/restart/uninstall |
 | `tests/` | new — see below |
 
 ## Config
