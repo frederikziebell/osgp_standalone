@@ -370,7 +370,7 @@ async function loadHistory() {
 
 function drawChart() {
   const svg = document.getElementById("chart-svg");
-  const W = 800, H = 260, padL = 46, padR = 10, padT = 14, padB = 24;
+  const W = 800, H = 260, padL = 58, padR = 10, padT = 14, padB = 24;
   svg.innerHTML = "";
 
   const metric = METRICS.find(m => m.field === metricSelect.value) || METRICS[0];
@@ -391,10 +391,14 @@ function drawChart() {
   const xs = points.map(p => p.bucket_ts);
   const ys = points.map(p => p[metric.field]);
   const minX = xs[0], maxX = xs[xs.length - 1];
-  let minY = Math.min(...ys), maxY = Math.max(...ys);
-  if (minY === maxY) { minY -= 1; maxY += 1; }
-  const yPad = (maxY - minY) * 0.08;
-  minY -= yPad; maxY += yPad;
+  // Y-axis always includes zero as its baseline - most fields here (current, voltage,
+  // energy) are never negative anyway, but power/reactive-power fields can be, so pin
+  // to zero rather than assuming, and only pad below it when there's actual negative
+  // data to show.
+  let minY = Math.min(0, ...ys), maxY = Math.max(0, ...ys);
+  const yPad = (maxY - minY || 1) * 0.08;
+  maxY += yPad;
+  if (minY < 0) minY -= yPad;
 
   const xScale = x => padL + (W - padL - padR) * (x - minX) / (maxX - minX);
   const yScale = y => padT + (H - padT - padB) * (1 - (y - minY) / (maxY - minY));
@@ -414,7 +418,7 @@ function drawChart() {
     const yPix = yScale(y);
     addEl("line", { x1: padL, x2: W - padR, y1: yPix, y2: yPix, class: "chart-gridline" });
     addEl("text", { x: padL - 8, y: yPix + 4, "text-anchor": "end", class: "chart-axis-label" })
-      .textContent = fmt(y, metric.digits);
+      .textContent = fmt(y, metric.digits) + " " + metric.unit;
   }
 
   // x-axis labels (5 ticks).
