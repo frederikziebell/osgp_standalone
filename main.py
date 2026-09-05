@@ -112,6 +112,9 @@ def main():
     logoff_interval_seconds = parse_int(props, "logoffIntervalSeconds", 540)
     idle_start_time = props.get("idleStartTime", "02:10:00")
     idle_seconds = parse_int(props, "idleSeconds", 480)
+    web_enabled = props.get("webEnabled", "true").strip().lower() not in ("false", "0", "no")
+    web_bind = props.get("webBind", "0.0.0.0").strip()
+    web_port = parse_int(props, "webPort", 8080)
 
     logger.info("Starting Standalone Smart Meter Reader (config: %s)...", config_path)
 
@@ -132,7 +135,21 @@ def main():
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
 
-    reader.connect_and_run()
+    dashboard_server = None
+    if web_enabled:
+        from dashboard import DashboardServer
+        try:
+            dashboard_server = DashboardServer(reader, web_bind, web_port)
+            dashboard_server.start()
+        except OSError as e:
+            logger.error("Could not start dashboard web server on %s:%d: %s",
+                        web_bind, web_port, e)
+
+    try:
+        reader.connect_and_run()
+    finally:
+        if dashboard_server is not None:
+            dashboard_server.stop()
 
 
 if __name__ == "__main__":

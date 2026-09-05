@@ -26,3 +26,10 @@ idleSeconds=480
 # ERROR, WARNING, INFO, DEBUG or TRACE. TRACE logs every frame on the wire and is
 # the equivalent of the Java version's -Dorg.slf4j.simpleLogger.defaultLogLevel.
 logLevel=INFO
+
+# Live-readings dashboard, served over plain HTTP with no authentication - visit
+# http://<this-host>:webPort/ from any device on the same LAN. Set webEnabled=false
+# to disable it, or webBind=127.0.0.1 to only allow access via an SSH tunnel/VPN.
+webEnabled=true
+webBind=0.0.0.0
+webPort=8080

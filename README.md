@@ -23,6 +23,19 @@ python3 main.py config.properties
 
 Ctrl+C (or `systemctl stop`) triggers a clean LOGOFF/TERMINATE before exiting.
 
+## Live dashboard
+
+The reader also serves a live-readings dashboard over plain HTTP. With the default
+config, visit `http://<pi-ip-or-hostname>:8080/` from any device on the same LAN to see
+current power, per-phase current/voltage and cumulative energy, refreshed every 2
+seconds.
+
+It's built on Python's standard library only (no Flask etc.), so there's nothing extra
+to install. There's also no authentication — anyone who can reach the port can view live
+readings — so either trust your LAN, set `webBind=127.0.0.1` and reach it over an SSH
+tunnel/VPN instead, or set `webEnabled=false` to turn it off entirely. See
+`config.properties.example` for the `web*` keys.
+
 ## Files
 
 | File | Ported from |
@@ -31,6 +44,7 @@ Ctrl+C (or `systemctl stop`) triggers a clean LOGOFF/TERMINATE before exiting.
 | `meter_reader.py` | `OsgpMeterReader.java` |
 | `c1218.py` | `C1218Constants.java` |
 | `crc16.py` | `CRC16.java` |
+| `dashboard.py` | new — LAN live-readings dashboard |
 | `tests/` | new — see below |
 
 ## Config

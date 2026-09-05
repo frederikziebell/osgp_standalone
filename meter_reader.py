@@ -129,6 +129,11 @@ class OsgpMeterReader:
         self._stop_requested = threading.Event()
         self._session_active = False
 
+        # Latest live readings, exposed to the dashboard web server. Guarded by a lock
+        # since it's written from the poll loop thread and read from HTTP handler threads.
+        self._state_lock = threading.Lock()
+        self._state = {"connected": False, "last_update": None}
+
         if len(self.username) > 10:
             logger.warning("Username '%s' is longer than 10 characters and will be truncated",
                            self.username)
@@ -139,6 +144,11 @@ class OsgpMeterReader:
     def request_stop(self):
         """Requests a graceful shutdown; takes effect within one poll cycle."""
         self._stop_requested.set()
+
+    def get_snapshot(self):
+        """Returns a copy of the latest live readings, for the dashboard web server."""
+        with self._state_lock:
+            return dict(self._state)
 
     @property
     def _running(self):
@@ -282,6 +292,10 @@ class OsgpMeterReader:
             logger.warning("Truncated table reply: %s", e)
         if not ok:
             logger.warning("Failed to read live values from the meter this cycle.")
+        with self._state_lock:
+            self._state["connected"] = ok
+            if ok:
+                self._state["last_update"] = datetime.now().isoformat(timespec="seconds")
         return ok
 
     def _terminate_session(self):
@@ -531,6 +545,9 @@ class OsgpMeterReader:
               % (format(fwd_active_energy_wh, ","), fwd_active_energy_wh / 1000.0))
         print("  Reverse Active Energy : %s Wh (%.3f kWh)"
               % (format(rev_active_energy_wh, ","), rev_active_energy_wh / 1000.0))
+        with self._state_lock:
+            self._state["fwd_active_energy_wh"] = fwd_active_energy_wh
+            self._state["rev_active_energy_wh"] = rev_active_energy_wh
         return True
 
     def _handle_table28_reply(self, table_data):
@@ -572,6 +589,19 @@ class OsgpMeterReader:
               % (l1_current_ma / 1000.0, l2_current_ma / 1000.0, l3_current_ma / 1000.0))
         print("  L1/L2/L3 Voltage       : %.3f / %.3f / %.3f V"
               % (l1_voltage_mv / 1000.0, l2_voltage_mv / 1000.0, l3_voltage_mv / 1000.0))
+        with self._state_lock:
+            self._state.update({
+                "fwd_active_power_w": fwd_active_power_w,
+                "rev_active_power_w": rev_active_power_w,
+                "import_reactive_var": import_reactive_var,
+                "export_reactive_var": export_reactive_var,
+                "l1_current_a": l1_current_ma / 1000.0,
+                "l2_current_a": l2_current_ma / 1000.0,
+                "l3_current_a": l3_current_ma / 1000.0,
+                "l1_voltage_v": l1_voltage_mv / 1000.0,
+                "l2_voltage_v": l2_voltage_mv / 1000.0,
+                "l3_voltage_v": l3_voltage_mv / 1000.0,
+            })
         return True
 
     # ---------------------------------------------------------------
