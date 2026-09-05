@@ -68,7 +68,7 @@ DASHBOARD_HTML = """<!doctype html>
   .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
   .dot.good { background: var(--good); }
   .dot.critical { background: var(--critical); }
-  .sysinfo { font-size: 11px; color: var(--muted); }
+  .sysinfo { font-size: 11px; color: var(--text-2); }
   .sysinfo .stat-warning { color: var(--warning); font-weight: 600; }
   .sysinfo .stat-critical { color: var(--critical); font-weight: 700; }
   .hero {
@@ -300,9 +300,14 @@ async function pollSystem() {
     parts.push(`<span class="${cls}">${data.temp_c.toFixed(1)}&deg;C</span>`);
   }
   if (data.cpu_load_1m !== null && data.cpu_load_1m !== undefined) {
+    // Unix load average is "cores wanted", not a percentage - a 1-min load of 1.0 on
+    // a quad-core Pi is one core's worth of work, i.e. ~25% of total capacity. Scale
+    // by core count so this reads as the "% of total CPU capacity" a percentage sign
+    // implies (100% = all cores fully busy), same thresholds as before just rescaled.
     const cores = data.cpu_count || 4;
-    const cls = severityClass(data.cpu_load_1m, cores, cores * 2);
-    parts.push(`<span class="${cls}">load ${data.cpu_load_1m.toFixed(2)}</span>`);
+    const loadPercent = (data.cpu_load_1m / cores) * 100;
+    const cls = severityClass(loadPercent, 100, 200);
+    parts.push(`<span class="${cls}">CPU ${Math.round(loadPercent)}%</span>`);
   }
   if (data.mem_percent !== null && data.mem_percent !== undefined) {
     const cls = severityClass(data.mem_percent, MEM_WARN_PCT, MEM_CRIT_PCT);
