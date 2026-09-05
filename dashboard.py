@@ -64,6 +64,14 @@ DASHBOARD_HTML = """<!doctype html>
   header { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 20px; }
   h1 { font-size: 20px; font-weight: 600; margin: 0; }
   .status-col { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+  @media (max-width: 480px) {
+    /* Once the title no longer fits alongside it, .status-col wraps onto its own line -
+       a lone item on a wrapped flex line doesn't reliably stay pinned to the end edge
+       under space-between, which is what left it stranded near the center. Stack and
+       stretch explicitly instead of relying on that fallback. */
+    header { flex-direction: column; align-items: stretch; }
+    .status-col { width: 100%; }
+  }
   .status { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-2); }
   .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
   .dot.good { background: var(--good); }
