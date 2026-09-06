@@ -293,6 +293,14 @@ function severityClass(value, warnAt, critAt) {
   return "";
 }
 
+function formatBytes(bytes) {
+  if (bytes < 1024) return bytes + " B";
+  const units = ["KB", "MB", "GB"];
+  let value = bytes / 1024, i = 0;
+  while (value >= 1024 && i < units.length - 1) { value /= 1024; i++; }
+  return value.toFixed(1) + " " + units[i];
+}
+
 async function pollSystem() {
   let data;
   try {
@@ -320,6 +328,21 @@ async function pollSystem() {
   if (data.mem_percent !== null && data.mem_percent !== undefined) {
     const cls = severityClass(data.mem_percent, MEM_WARN_PCT, MEM_CRIT_PCT);
     parts.push(`<span class="${cls}">mem ${Math.round(data.mem_percent)}%</span>`);
+  }
+  if (data.db_bytes !== null && data.db_bytes !== undefined) {
+    parts.push(`db ${formatBytes(data.db_bytes)}`);
+  }
+  if (data.power) {
+    const p = data.power;
+    let cls = "", label = "power OK";
+    if (p.undervoltage_now || p.throttled_now) {
+      cls = "stat-critical";
+      label = "power " + (p.undervoltage_now ? "undervoltage" : "throttled") + " now";
+    } else if (p.undervoltage_ever || p.throttled_ever) {
+      cls = "stat-warning";
+      label = "power issue since boot";
+    }
+    parts.push(`<span class="${cls}">${label}</span>`);
   }
   document.getElementById("sysinfo").innerHTML = parts.join(" &middot; ");
 }
@@ -523,7 +546,9 @@ class _DashboardRequestHandler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/history":
             self._handle_history(parse_qs(parsed.query))
         elif parsed.path == "/api/system":
-            self._send(200, json.dumps(get_system_stats()).encode("utf-8"), "application/json")
+            db_path = getattr(self.server, "history_db_path", None)
+            self._send(200, json.dumps(get_system_stats(db_path=db_path)).encode("utf-8"),
+                       "application/json")
         else:
             self._send(404, b"Not found", "text/plain; charset=utf-8")
 

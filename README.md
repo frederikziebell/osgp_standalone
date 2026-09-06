@@ -97,6 +97,19 @@ grey. No dependency beyond the standard library: reads `/proc/meminfo`,
 `os.getloadavg()`, and `/sys/class/thermal/thermal_zone*/temp` (Linux/Raspberry Pi OS
 only).
 
+Two more stats round it out:
+
+- **`db`** — the size of the history SQLite file on disk, so you can see storage growth
+  (and confirm the yearly coarsening described above is actually keeping it bounded).
+- **Power supply status** — the Pi firmware only ever detects *under*-voltage (there's
+  no over-voltage/over-current signal to read). Uses `vcgencmd get_throttled` when
+  available (needs the `video` group, or root — `sudo usermod -a -G video $USER`), since
+  it distinguishes "under-voltage right now" from "under-voltage has happened since
+  boot," catching a brief power blip a 5-second poll would otherwise miss; falls back to
+  the kernel's own sysfs alarm (`in0_lcrit_alarm` under the `rpi_volt` hwmon device, no
+  extra group needed) if `vcgencmd` isn't usable, which only reports the current instant.
+  Shows plain "power OK" until either signals a problem.
+
 ## Files
 
 | File | Ported from |
