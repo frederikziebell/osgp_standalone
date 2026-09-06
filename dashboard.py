@@ -401,7 +401,15 @@ async function loadHistory() {
 
 function drawChart() {
   const svg = document.getElementById("chart-svg");
-  const W = 800, H = 260, padL = 58, padR = 10, padT = 14, padB = 24;
+  // Match the viewBox to the actual rendered width instead of a fixed 800 - with
+  // preserveAspectRatio="none", a fixed viewBox gets non-uniformly stretched/squeezed
+  // to fit whatever box the CSS actually gives it, which distorts strokes and (most
+  // visibly) axis label text on any screen narrower than 800 CSS pixels, like a phone.
+  // Measuring first keeps 1 user unit == 1 real pixel, so nothing gets stretched.
+  const measuredWidth = Math.round(svg.getBoundingClientRect().width);
+  const W = measuredWidth > 0 ? measuredWidth : 800, H = 260;
+  const padL = 58, padR = 10, padT = 14, padB = 24;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
   svg.innerHTML = "";
 
   const metric = METRICS.find(m => m.field === metricSelect.value) || METRICS[0];
@@ -525,6 +533,15 @@ document.getElementById("range-buttons").addEventListener("click", (ev) => {
 
 loadHistory();
 setInterval(loadHistory, 60000);
+
+// Redraw on resize/orientation-change so the viewBox keeps matching the real width
+// (e.g. rotating a phone, or resizing a desktop window) - debounced since 'resize'
+// fires continuously while dragging.
+let resizeRedrawTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeRedrawTimer);
+  resizeRedrawTimer = setTimeout(drawChart, 150);
+});
 </script>
 </body>
 </html>
