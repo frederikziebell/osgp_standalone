@@ -1,0 +1,45 @@
+# Copy this file to config.properties and fill in your own values.
+# config.properties contains your meter password - do NOT commit it to git.
+
+# Serial port the optical probe is connected to
+port=/dev/ttyUSB0
+
+# Baud rate - 9600 is standard for C12.18 optical probes
+baud=9600
+
+# Your meter's 20-character ASCII password/key
+password=YOUR_20_CHAR_ASCII_KEY_HERE
+
+# These match openHAB's own defaults - only change if you changed them there too
+username=OpenHAB
+userId=1
+
+# How often to poll the meter, and how often to log off & log back on (seconds)
+refreshIntervalSeconds=2
+logoffIntervalSeconds=540
+
+# Daily window during which the tool will NOT talk to the meter, to leave the
+# optical port free for the utility's own reader (matches openHAB's defaults)
+idleStartTime=02:10:00
+idleSeconds=480
+
+# ERROR, WARNING, INFO, DEBUG or TRACE. TRACE logs every frame on the wire and is
+# the equivalent of the Java version's -Dorg.slf4j.simpleLogger.defaultLogLevel.
+logLevel=INFO
+
+# Live-readings dashboard, served over plain HTTP with no authentication - visit
+# http://<this-host>:webPort/ from any device on the same LAN. Set webEnabled=false
+# to disable it, or webBind=127.0.0.1 to only allow access via an SSH tunnel/VPN.
+webEnabled=true
+webBind=0.0.0.0
+webPort=8080
+
+# History logging (powers the 24h/week/month/year charts on the dashboard). Stored in
+# a single SQLite file - no separate database server needed. One row is logged every
+# historySampleSeconds regardless of how often the meter itself is polled. Once a
+# calendar year is more than a year old (e.g. 2025 once 2027 starts), its per-minute
+# rows are automatically consolidated to 5-minute averages to keep the file small
+# long-term - see README.
+historyEnabled=true
+historyDbPath=history.sqlite3
+historySampleSeconds=60
