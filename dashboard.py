@@ -250,8 +250,8 @@ async function poll() {
   setValue("l1-v", fmt(data.l1_voltage_v, 1));
   setValue("l2-v", fmt(data.l2_voltage_v, 1));
   setValue("l3-v", fmt(data.l3_voltage_v, 1));
-  setValue("fwd-kwh", data.fwd_active_energy_wh != null ? fmt(data.fwd_active_energy_wh / 1000, 3) : null);
-  setValue("rev-kwh", data.rev_active_energy_wh != null ? fmt(data.rev_active_energy_wh / 1000, 3) : null);
+  setValue("fwd-kwh", data.fwd_active_energy_wh != null ? fmt(data.fwd_active_energy_wh / 1000, 0) : null);
+  setValue("rev-kwh", data.rev_active_energy_wh != null ? fmt(data.rev_active_energy_wh / 1000, 0) : null);
 
   const footer = document.getElementById("footer");
   if (data.last_update) {
@@ -365,8 +365,8 @@ const METRICS = [
   { field: "l1_voltage_v", label: "L1 voltage", unit: "V", digits: 1 },
   { field: "l2_voltage_v", label: "L2 voltage", unit: "V", digits: 1 },
   { field: "l3_voltage_v", label: "L3 voltage", unit: "V", digits: 1 },
-  { field: "fwd_active_energy_wh", label: "Forward active energy", unit: "Wh", digits: 0 },
-  { field: "rev_active_energy_wh", label: "Reverse active energy", unit: "Wh", digits: 0 },
+  { field: "fwd_active_energy_wh", label: "Forward active energy", unit: "Wh", digits: 0, integer: true },
+  { field: "rev_active_energy_wh", label: "Reverse active energy", unit: "Wh", digits: 0, integer: true },
 ];
 
 const metricSelect = document.getElementById("metric-select");
@@ -420,10 +420,14 @@ function niceNumber(range, round) {
   return niceFraction * Math.pow(10, exponent);
 }
 
-function niceAxisTicks(dataMin, dataMax, targetTicks) {
+function niceAxisTicks(dataMin, dataMax, targetTicks, integerOnly) {
   if (dataMin === dataMax) dataMax = dataMin + 1;
   const range = niceNumber(dataMax - dataMin, false);
-  const step = niceNumber(range / (targetTicks - 1), true);
+  let step = niceNumber(range / (targetTicks - 1), true);
+  // Cumulative energy is a whole-Wh counter at the protocol level (a 4-byte integer
+  // on the wire) - never let a near-zero range (e.g. a household that rarely exports)
+  // pick a sub-1 step, which would show fractional Wh on the axis.
+  if (integerOnly) step = Math.max(1, Math.round(step));
   const min = Math.floor(dataMin / step) * step;
   const max = Math.ceil(dataMax / step) * step;
   const decimals = Math.max(0, -Math.floor(Math.log10(step) + 1e-9));
@@ -466,7 +470,7 @@ function drawChart() {
   // to zero rather than assuming, and only pad below it when there's actual negative
   // data to show.
   const dataMin = Math.min(0, ...ys), dataMax = Math.max(0, ...ys);
-  const axis = niceAxisTicks(dataMin, dataMax, 5);
+  const axis = niceAxisTicks(dataMin, dataMax, 5, metric.integer);
   const minY = axis.min, maxY = axis.max;
 
   const xScale = x => padL + (W - padL - padR) * (x - minX) / (maxX - minX);
