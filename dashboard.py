@@ -399,6 +399,37 @@ async function loadHistory() {
   drawChart();
 }
 
+// "Nice numbers for graph labels" (Heckbert) - picks round tick steps (1/2/5 x 10^n)
+// instead of dividing the range into arbitrary equal parts, so the gap between any
+// two axis labels is always something like 500 or 0.2, never 405.8.
+function niceNumber(range, round) {
+  const exponent = Math.floor(Math.log10(range));
+  const fraction = range / Math.pow(10, exponent);
+  let niceFraction;
+  if (round) {
+    if (fraction < 1.5) niceFraction = 1;
+    else if (fraction < 3) niceFraction = 2;
+    else if (fraction < 7) niceFraction = 5;
+    else niceFraction = 10;
+  } else {
+    if (fraction <= 1) niceFraction = 1;
+    else if (fraction <= 2) niceFraction = 2;
+    else if (fraction <= 5) niceFraction = 5;
+    else niceFraction = 10;
+  }
+  return niceFraction * Math.pow(10, exponent);
+}
+
+function niceAxisTicks(dataMin, dataMax, targetTicks) {
+  if (dataMin === dataMax) dataMax = dataMin + 1;
+  const range = niceNumber(dataMax - dataMin, false);
+  const step = niceNumber(range / (targetTicks - 1), true);
+  const min = Math.floor(dataMin / step) * step;
+  const max = Math.ceil(dataMax / step) * step;
+  const decimals = Math.max(0, -Math.floor(Math.log10(step) + 1e-9));
+  return { min, max, step, decimals };
+}
+
 function drawChart() {
   const svg = document.getElementById("chart-svg");
   // Match the viewBox to the actual rendered width instead of a fixed 800 - with
@@ -434,10 +465,9 @@ function drawChart() {
   // energy) are never negative anyway, but power/reactive-power fields can be, so pin
   // to zero rather than assuming, and only pad below it when there's actual negative
   // data to show.
-  let minY = Math.min(0, ...ys), maxY = Math.max(0, ...ys);
-  const yPad = (maxY - minY || 1) * 0.08;
-  maxY += yPad;
-  if (minY < 0) minY -= yPad;
+  const dataMin = Math.min(0, ...ys), dataMax = Math.max(0, ...ys);
+  const axis = niceAxisTicks(dataMin, dataMax, 5);
+  const minY = axis.min, maxY = axis.max;
 
   const xScale = x => padL + (W - padL - padR) * (x - minX) / (maxX - minX);
   const yScale = y => padT + (H - padT - padB) * (1 - (y - minY) / (maxY - minY));
@@ -450,14 +480,15 @@ function drawChart() {
     return el;
   };
 
-  // Horizontal gridlines + y-axis labels (4 bands).
-  const bands = 4;
-  for (let i = 0; i <= bands; i++) {
-    const y = minY + (maxY - minY) * i / bands;
+  // Horizontal gridlines + y-axis labels, at the "nice" step computed above - so the
+  // gap between any two labels is always a round number (e.g. steps of 500, not 405.8).
+  const tickCount = Math.round((axis.max - axis.min) / axis.step);
+  for (let i = 0; i <= tickCount; i++) {
+    const y = axis.min + i * axis.step;
     const yPix = yScale(y);
     addEl("line", { x1: padL, x2: W - padR, y1: yPix, y2: yPix, class: "chart-gridline" });
     addEl("text", { x: padL - 8, y: yPix + 4, "text-anchor": "end", class: "chart-axis-label" })
-      .textContent = fmt(y, metric.digits) + " " + metric.unit;
+      .textContent = fmt(y, axis.decimals) + " " + metric.unit;
   }
 
   // x-axis labels (5 ticks).
