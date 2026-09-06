@@ -40,6 +40,16 @@ require_systemd() {
     fi
 }
 
+# Reads one 'key=value' line from a .properties file (first match, whitespace-trimmed
+# value); echoes $2 if the key isn't set. Not a full parser - just enough to read the
+# handful of shelly* keys service.sh itself needs, same as main.py's Python parser
+# reads the rest at runtime.
+config_get() {
+    local key="$1" default="$2" file="$3" value
+    value="$(grep -E "^${key}[[:space:]]*=" "$file" 2>/dev/null | head -1 | cut -d= -f2- | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    if [[ -z "$value" ]]; then echo "$default"; else echo "$value"; fi
+}
+
 cmd_install() {
     require_root
     require_systemd
@@ -93,6 +103,26 @@ cmd_install() {
         fi
     fi
 
+    # The Shelly emulator (if enabled in the config) needs battery/inverter apps to
+    # reach it on port 80, but the service itself runs unprivileged - so redirect port
+    # 80 to the port it actually binds via one idempotent iptables rule, applied as
+    # root by the '+' prefix (systemd's "run this one step unsandboxed/as root
+    # regardless of this unit's User=" mechanism) right before the unprivileged main
+    # process starts. Nothing about the running service itself becomes privileged.
+    local shelly_enabled shelly_execstartpre=""
+    shelly_enabled="$(config_get shellyEnabled false "$config_path")"
+    if [[ "$shelly_enabled" == "true" ]]; then
+        if ! command -v iptables >/dev/null 2>&1; then
+            echo "Warning: shellyEnabled=true but 'iptables' isn't installed - the port 80" >&2
+            echo "redirect won't be set up. Install it (e.g. 'sudo apt install iptables') and" >&2
+            echo "run 'sudo $0 install' again, or reach the emulator directly on shellyPort." >&2
+        else
+            local shelly_port
+            shelly_port="$(config_get shellyPort 8081 "$config_path")"
+            shelly_execstartpre="ExecStartPre=+/bin/sh -c 'iptables -t nat -C PREROUTING -p tcp --dport 80 -j REDIRECT --to-port ${shelly_port} 2>/dev/null || iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port ${shelly_port}'"
+        fi
+    fi
+
     cat > "$UNIT_PATH" <<EOF
 [Unit]
 Description=OSGP standalone smart meter reader
@@ -103,6 +133,7 @@ Type=simple
 User=$run_user
 WorkingDirectory=$SCRIPT_DIR
 Environment=PYTHONUNBUFFERED=1
+$shelly_execstartpre
 ExecStart=$SCRIPT_DIR/run.sh $config_file
 Restart=on-failure
 RestartSec=5
@@ -121,6 +152,11 @@ EOF
     echo "This checkout is now the live deployment - don't delete or move it while the"
     echo "service is installed. 'git pull' here and 'sudo $0 restart' to update; run"
     echo "'sudo $0 uninstall' first if you need to relocate or remove this checkout."
+    if [[ -n "$shelly_execstartpre" ]]; then
+        echo
+        echo "Shelly Pro 3EM emulator enabled: port 80 will be redirected to $shelly_port"
+        echo "on every service start (removed again by 'sudo $0 uninstall')."
+    fi
     echo
     echo "Run 'sudo $0 start' to start it now, or reboot - it's enabled at boot already."
     echo "Logs: journalctl -u $SERVICE_NAME -f"
@@ -129,6 +165,19 @@ EOF
 cmd_uninstall() {
     require_root
     require_systemd
+
+    # If the Shelly port-80 redirect was set up, read the port back out of the unit
+    # file (it's baked into the ExecStartPre line at install time) and remove it,
+    # rather than requiring the config file to still exist/be unchanged.
+    if [[ -f "$UNIT_PATH" ]]; then
+        local shelly_port
+        shelly_port="$(grep -oE -- '--to-port [0-9]+' "$UNIT_PATH" | head -1 | awk '{print $2}' || true)"
+        if [[ -n "$shelly_port" ]] && command -v iptables >/dev/null 2>&1; then
+            iptables -t nat -D PREROUTING -p tcp --dport 80 -j REDIRECT --to-port "$shelly_port" 2>/dev/null || true
+            echo "Removed the port 80 -> $shelly_port redirect rule."
+        fi
+    fi
+
     systemctl stop "$SERVICE_NAME" 2>/dev/null || true
     systemctl disable "$SERVICE_NAME" 2>/dev/null || true
     rm -f "$UNIT_PATH"

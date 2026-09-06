@@ -118,6 +118,14 @@ def main():
     history_enabled = props.get("historyEnabled", "true").strip().lower() not in ("false", "0", "no")
     history_db_path = props.get("historyDbPath", "history.sqlite3").strip()
     history_sample_seconds = parse_int(props, "historySampleSeconds", 60)
+    # Opt-in (unlike web/history above) - it makes this Pi answer to a battery app as if
+    # it were a real Shelly Pro 3EM, which most users won't want by default.
+    shelly_enabled = props.get("shellyEnabled", "false").strip().lower() not in ("false", "0", "no")
+    shelly_bind = props.get("shellyBind", "0.0.0.0").strip()
+    shelly_port = parse_int(props, "shellyPort", 8081)
+    shelly_identity_path = props.get("shellyIdentityPath", "shelly_identity.json").strip()
+    shelly_invert_power_sign = (props.get("shellyInvertPowerSign", "false").strip().lower()
+                                not in ("false", "0", "no"))
 
     logger.info("Starting Standalone Smart Meter Reader (config: %s)...", config_path)
 
@@ -156,6 +164,18 @@ def main():
             logger.error("Could not start dashboard web server on %s:%d: %s",
                         web_bind, web_port, e)
 
+    shelly_server = None
+    if shelly_enabled:
+        from shelly_emulator import ShellyEmulatorServer
+        try:
+            shelly_server = ShellyEmulatorServer(reader, shelly_bind, shelly_port,
+                                                 identity_path=shelly_identity_path,
+                                                 invert_power_sign=shelly_invert_power_sign)
+            shelly_server.start()
+        except OSError as e:
+            logger.error("Could not start Shelly emulator on %s:%d: %s",
+                        shelly_bind, shelly_port, e)
+
     try:
         reader.connect_and_run()
     finally:
@@ -163,6 +183,8 @@ def main():
             dashboard_server.stop()
         if history_logger is not None:
             history_logger.stop()
+        if shelly_server is not None:
+            shelly_server.stop()
 
 
 if __name__ == "__main__":

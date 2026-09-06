@@ -43,3 +43,21 @@ webPort=8080
 historyEnabled=true
 historyDbPath=history.sqlite3
 historySampleSeconds=60
+
+# Shelly Pro 3EM emulation - lets battery/inverter apps that only support pairing a
+# real Shelly meter (Anker SOLIX, Marstek Venus, EcoFlow PowerStream, Hoymiles/Growatt
+# balcony inverters, ...) use this Pi's readings instead. Off by default - unlike the
+# dashboard/history above, this makes the Pi answer network requests as if it were a
+# different device, which most users won't want. See README for the port-80 setup
+# ('sudo ./service.sh install' reads shellyPort below and wires up the redirect itself
+# if shellyEnabled=true).
+shellyEnabled=false
+shellyBind=0.0.0.0
+shellyPort=8081
+shellyIdentityPath=shelly_identity.json
+# Shelly's own docs don't actually define whether positive power means importing or
+# exporting - it's a physical CT-clamp-orientation convention, not a protocol
+# guarantee (real Shelly devices ship a "Reverse CT measurement direction" toggle for
+# exactly this reason). We default to positive=importing. If your battery app's own
+# display shows import/export backwards once paired, flip this instead of the code.
+shellyInvertPowerSign=false

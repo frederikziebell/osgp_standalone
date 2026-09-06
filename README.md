@@ -110,6 +110,69 @@ Two more stats round it out:
   extra group needed) if `vcgencmd` isn't usable, which only reports the current instant.
   Shows plain "power OK" until either signals a problem.
 
+## Shelly Pro 3EM emulation
+
+Several home-battery/balcony-inverter apps (Anker SOLIX, Marstek Venus, EcoFlow
+PowerStream, Hoymiles/Growatt) only officially support pairing a real **Shelly Pro
+3EM** as their grid-power meter for zero-feed-in control. Setting `shellyEnabled=true`
+makes this Pi answer to those apps as if it were one, using the OSGP meter's readings
+instead — no separate Shelly hardware needed. This isn't a novel hack: several
+open-source projects do the same thing for the same reason (see credits below). Off by
+default, since unlike the dashboard/history above, it makes the Pi impersonate a
+different device on the network.
+
+**What's real vs. estimated:** per-phase voltage and current are genuine L1/L2/L3
+meter readings. Per-phase *power* is not — the OSGP meter only reports a combined
+total (no per-phase breakdown), so each phase's power is estimated by splitting the
+total proportionally to that phase's share of the current. Total power/energy (what
+these apps' zero-feed-in logic actually acts on) are exact, not estimated.
+
+**Sign convention — read this before trusting it with a real battery.** We send
+positive `act_power` for importing from the grid, negative for exporting. Important
+caveat: Shelly's own official API docs do *not* actually define this anywhere (checked
+directly — the field is documented only as "Active power measurement value, [W]", no
+mention of import/export). What we based this on instead is Shelly's installation/
+troubleshooting documentation, which treats "negative power while a known load is
+consuming" as the fault symptom to fix (by flipping the CT clamp or using the
+"Reverse CT measurement direction" toggle) — implying positive-for-consumption is the
+intended, correctly-installed behavior. But that's precisely the point: **on a real
+Shelly, this is a physical CT-clamp-orientation convention, not a protocol guarantee**
+— which is exactly why that reverse-direction toggle exists, and exactly why a battery
+app *could* still assume either sign internally regardless of what Shelly's hardware
+does. Don't take our word (or Shelly's ambiguous docs) for it — verify before relying
+on this for real charge/discharge decisions: turn on a large load with solar
+production at (or near) zero, so the house is certainly net-importing, then check
+`curl <pi-ip>:<shellyPort>/rpc/EM.GetStatus` shows a *positive* `total_act_power`, and
+confirm the paired battery app's own UI displays that moment as "importing" — not just
+that our number looks right, but that the app *interprets* it as intended. If it's
+backwards, set `shellyInvertPowerSign=true` in the config (mirrors Shelly's own reverse
+toggle) rather than patching the code, and it's flipped for both the total and every
+per-phase value (energy counters aren't affected — imported/exported energy are
+already separate non-negative fields, there's no sign to invert there).
+
+**Pairing:** in the battery app, add a meter and choose "Shelly Pro 3EM," entering this
+Pi's IP address (no network auto-discovery is implemented — none of the apps checked
+above need it; they all take a manual IP). A stable fake device id/MAC is generated
+once and saved to `shellyIdentityPath` (`shelly_identity.json` by default) so re-pairing
+isn't needed after a restart.
+
+**Port 80:** these apps expect the meter on port 80, but the service runs unprivileged
+(no root) — see [Running as a service](#running-as-a-service) above. `sudo ./service.sh
+install` handles this automatically when `shellyEnabled=true`: it adds one idempotent
+`iptables`/`nftables` rule (`port 80 → shellyPort`, applied via systemd's `+`-prefixed
+`ExecStartPre`, i.e. as a one-shot root step before the still-fully-unprivileged main
+process starts — nothing about the running service becomes privileged) and removes it
+again on `sudo ./service.sh uninstall`. If you're running `main.py` directly instead of
+through the service, either set up that redirect yourself or just point the battery app
+at `<pi-ip>:8081` (`shellyPort`) directly, if its "add meter" screen lets you specify a
+port.
+
+Credits: this pattern — and the confirmation that manual IP pairing is enough, no
+discovery needed — comes from existing community projects doing the same thing:
+[anker-shelly-meter](https://github.com/JoergNi/anker-shelly-meter),
+[virtual_shelly3empro](https://github.com/jonasneustock/virtual_shelly3empro),
+[Energy2Shelly_ESP](https://github.com/TheRealMoeder/Energy2Shelly_ESP).
+
 ## Files
 
 | File | Ported from |
@@ -121,6 +184,7 @@ Two more stats round it out:
 | `dashboard.py` | new — LAN live-readings dashboard |
 | `history.py` | new — SQLite history logging, coarsening, and chart queries |
 | `sysinfo.py` | new — CPU load / memory / temperature stats for the dashboard |
+| `shelly_emulator.py` | new — Shelly Pro 3EM emulation for battery/inverter apps |
 | `service.sh` | new — systemd service install/start/stop/restart/uninstall |
 | `tests/` | new — see below |
 
@@ -176,11 +240,13 @@ Coverage includes the CRC-16/X-25 check value, exact request-payload bytes for
 NEGOTIATE/LOGON/SECURITY/READ/READ-PARTIAL, the control-byte toggle, NACK-and-retry on a
 bad CRC, multi-packet reassembly, both meter byte orders, the midnight-wrapping idle
 window, and `.properties` parsing. `tests/test_history.py` covers the SQLite history
-logging, bucketed queries, and the year-coarsening logic the same way.
+logging, bucketed queries, and the year-coarsening logic the same way; `tests/test_shelly_emulator.py`
+covers the Shelly Pro 3EM data mapping (sign convention, per-phase estimation, identity
+persistence) and its HTTP endpoints.
 
 Nothing runs these automatically on its own — there's no CI and no build step (this
 isn't a package with an install/build process; it's just scripts run directly). A
-tracked pre-commit hook is included (`githooks/pre-commit`) that runs all three before
+tracked pre-commit hook is included (`githooks/pre-commit`) that runs all of them before
 each commit and blocks it on failure; since git doesn't read hooks from a tracked
 directory by default, opt in once per clone with:
 

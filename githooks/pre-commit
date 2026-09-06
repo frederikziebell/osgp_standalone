@@ -26,6 +26,11 @@ if ! "$PYTHON" tests/test_history.py; then
     exit 1
 fi
 
+if ! "$PYTHON" tests/test_shelly_emulator.py; then
+    echo "pre-commit: Shelly emulator tests failed - commit aborted." >&2
+    exit 1
+fi
+
 if ! "$PYTHON" tests/run_integration.py > /dev/null; then
     echo "pre-commit: integration test failed - commit aborted." >&2
     exit 1
