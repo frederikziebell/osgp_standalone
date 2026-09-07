@@ -201,6 +201,18 @@ class TestHttpServer(unittest.TestCase):
         self.assertEqual(envelope["dst"], "user_1")
         self.assertEqual(envelope["result"]["total_act_power"], 2300.0)
 
+    def test_post_rpc_trailing_slash(self):
+        # The real Shelly app posts to "/rpc/" (trailing slash), not "/rpc" - this
+        # silently 404'd until fixed, which is why the app couldn't finish device
+        # verification even though "/shelly" worked fine.
+        payload = json.dumps({"id": 1, "method": "EM.GetStatus"}).encode("utf-8")
+        req = urllib.request.Request(
+            "http://127.0.0.1:%d/rpc/" % self.port, data=payload,
+            headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req) as r:
+            envelope = json.loads(r.read())
+        self.assertEqual(envelope["result"]["total_act_power"], 2300.0)
+
 
 if __name__ == "__main__":
     unittest.main()

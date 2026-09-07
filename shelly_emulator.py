@@ -183,7 +183,8 @@ class _ShellyRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         mapper = self.server.mapper
-        if self.path != "/rpc":
+        # The real app posts to "/rpc/" (trailing slash) - accept both forms.
+        if self.path.rstrip("/") != "/rpc":
             self._send_json(404, {"error": "not found"})
             return
         try:
@@ -192,6 +193,7 @@ class _ShellyRequestHandler(BaseHTTPRequestHandler):
         except (ValueError, json.JSONDecodeError):
             body = {}
         method = body.get("method")
+        logger.debug("POST /rpc method=%r body=%r", method, body)
         result = mapper.dispatch(method) if method else None
         if result is None:
             self._send_json(404, {"error": "unknown method %r" % method})
@@ -206,6 +208,7 @@ class _ShellyRequestHandler(BaseHTTPRequestHandler):
 
     def _respond_to_method(self, method):
         mapper = self.server.mapper
+        logger.debug("GET /rpc method=%r", method)
         result = mapper.dispatch(method) if method else None
         if result is None:
             self._send_json(404, {"error": "unknown method %r" % method})
