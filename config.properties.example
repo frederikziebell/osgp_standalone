@@ -43,3 +43,15 @@ webPort=8080
 historyEnabled=true
 historyDbPath=history.sqlite3
 historySampleSeconds=60
+
+# everHome EcoTracker emulation - lets battery/inverter apps that support pairing a
+# generic "Smart CT" meter (e.g. Zendure's local Smart CT mode) use this Pi's readings
+# instead. Off by default - like the Shelly emulation this is modeled after, it makes
+# the Pi answer network requests as a different device, which most users won't want.
+# Needs the 'zeroconf' package (pip install zeroconf) for network discovery - the
+# plain HTTP endpoint works without it, but an app that "discovers" a meter rather
+# than taking a manual IP won't find this one. See README.
+ecotrackerEnabled=false
+ecotrackerBind=0.0.0.0
+ecotrackerPort=8082
+ecotrackerIdentityPath=ecotracker_identity.json

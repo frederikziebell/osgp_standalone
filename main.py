@@ -125,6 +125,7 @@ def main():
                           not in ("false", "0", "no"))
     ecotracker_bind = props.get("ecotrackerBind", "0.0.0.0").strip()
     ecotracker_port = parse_int(props, "ecotrackerPort", 8082)
+    ecotracker_identity_path = props.get("ecotrackerIdentityPath", "ecotracker_identity.json").strip()
 
     logger.info("Starting Standalone Smart Meter Reader (config: %s)...", config_path)
 
@@ -167,7 +168,8 @@ def main():
     if ecotracker_enabled:
         from ecotracker_emulator import EcoTrackerEmulatorServer
         try:
-            ecotracker_server = EcoTrackerEmulatorServer(reader, ecotracker_bind, ecotracker_port)
+            ecotracker_server = EcoTrackerEmulatorServer(reader, ecotracker_bind, ecotracker_port,
+                                                         identity_path=ecotracker_identity_path)
             ecotracker_server.start()
         except OSError as e:
             logger.error("Could not start EcoTracker emulator on %s:%d: %s",
