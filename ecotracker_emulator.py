@@ -132,14 +132,17 @@ class EcoTrackerDataMapper:
                     snap.get("l3_current_a")]
         phase_powers = _split_by_current(power, currents)
 
+        # The real device's documented example response uses plain integers
+        # ("power": 125, not 125.0) - match that rather than Python's floats, in case a
+        # strict embedded JSON parser on the other end cares about the distinction.
         return {
-            "power": power,
-            "powerAvg": power,  # no separate 1-minute average tracked here; same value
-            "powerPhase1": phase_powers[0],
-            "powerPhase2": phase_powers[1],
-            "powerPhase3": phase_powers[2],
-            "energyCounterIn": snap.get("fwd_active_energy_wh") or 0.0,
-            "energyCounterOut": snap.get("rev_active_energy_wh") or 0.0,
+            "power": round(power),
+            "powerAvg": round(power),  # no separate 1-minute average tracked; same value
+            "powerPhase1": round(phase_powers[0]),
+            "powerPhase2": round(phase_powers[1]),
+            "powerPhase3": round(phase_powers[2]),
+            "energyCounterIn": round(snap.get("fwd_active_energy_wh") or 0.0),
+            "energyCounterOut": round(snap.get("rev_active_energy_wh") or 0.0),
         }
 
 
