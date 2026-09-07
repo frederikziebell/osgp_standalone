@@ -151,6 +151,18 @@ class TestDataMapper(unittest.TestCase):
         self.assertIn("em:0", config)
         self.assertIn("emdata:0", config)
 
+    def test_cloud_disabled_by_default(self):
+        self.assertEqual(self.mapper.dispatch("Cloud.GetStatus"), {"connected": False})
+        self.assertFalse(self.mapper.dispatch("Shelly.GetConfig")["cloud"]["enable"])
+
+    def test_cloud_set_config_enables_and_is_reflected_elsewhere(self):
+        # This is what the real app calls right after adding the device by IP - without
+        # a response, it kept showing "pending connection"/"device offline".
+        result = self.mapper.dispatch("Cloud.SetConfig", {"config": {"enable": True}})
+        self.assertEqual(result, {"restart_required": False})
+        self.assertEqual(self.mapper.dispatch("Cloud.GetStatus"), {"connected": True})
+        self.assertTrue(self.mapper.dispatch("Shelly.GetConfig")["cloud"]["enable"])
+
 
 class TestHttpServer(unittest.TestCase):
     @classmethod

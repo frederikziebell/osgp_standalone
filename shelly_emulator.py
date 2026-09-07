@@ -88,6 +88,10 @@ class ShellyDataMapper:
         # change instead of a code change if a given battery app's assumption turns
         # out to be the opposite of what we picked (positive = importing).
         self._invert_power_sign = invert_power_sign
+        # Real cloud state can't be real here (this device never actually connects to
+        # Shelly's cloud) - tracked locally just so a SetConfig the app just made is
+        # reflected back consistently if it re-checks GetConfig/GetStatus afterward.
+        self._cloud_enabled = False
 
     def device_info(self):
         return {
@@ -162,7 +166,7 @@ class ShellyDataMapper:
         fw_id = "20250101-000000/v%s" % FIRMWARE_VERSION
         return {
             "ble": {"enable": False},
-            "cloud": {"enable": False, "server": "iot.shelly.cloud:6012/jrpc"},
+            "cloud": {"enable": self._cloud_enabled, "server": "iot.shelly.cloud:6012/jrpc"},
             "eth": {"enable": True, "ipv4mode": "dhcp", "ip": None, "netmask": None,
                    "gw": None, "nameserver": None},
             "mqtt": {"enable": False, "server": None, "user": None, "pass": None},
@@ -213,7 +217,17 @@ class ShellyDataMapper:
         result["total_act_ret"] = total_act_ret
         return result
 
-    def dispatch(self, method):
+    def cloud_get_status(self):
+        return {"connected": self._cloud_enabled}
+
+    def cloud_set_config(self, params):
+        # Not a real cloud connection - just remembered so a subsequent GetConfig/
+        # GetStatus reflects it consistently, in case the app checks after setting it.
+        enable = bool((params or {}).get("config", {}).get("enable", True))
+        self._cloud_enabled = enable
+        return {"restart_required": False}
+
+    def dispatch(self, method, params=None):
         if method == "EM.GetStatus":
             return self.em_get_status()
         if method == "EM.GetConfig":
@@ -224,6 +238,12 @@ class ShellyDataMapper:
             return self.device_info()
         if method == "Shelly.GetConfig":
             return self.shelly_get_config()
+        if method == "Cloud.GetStatus":
+            return self.cloud_get_status()
+        if method == "Cloud.SetConfig":
+            return self.cloud_set_config(params)
+        if method == "Cloud.GetConfig":
+            return {"enable": self._cloud_enabled}
         return None
 
 
@@ -257,7 +277,7 @@ class _ShellyRequestHandler(BaseHTTPRequestHandler):
             body = {}
         method = body.get("method")
         logger.debug("POST /rpc method=%r body=%r", method, body)
-        result = mapper.dispatch(method) if method else None
+        result = mapper.dispatch(method, body.get("params")) if method else None
         if result is None:
             self._send_json(404, {"error": "unknown method %r" % method})
             return
