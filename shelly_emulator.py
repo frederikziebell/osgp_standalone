@@ -136,6 +136,65 @@ class ShellyDataMapper:
         result["errors"] = []
         return result
 
+    def em_get_config(self):
+        # Real shape per shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/EM/
+        # (EM.GetConfig, not EM.GetStatus - a different method with a different
+        # response shape, previously conflated with em_get_status()).
+        return {
+            "id": 0,
+            "name": None,
+            "blink_mode_selector": "active_energy",
+            "phase_selector": "abc",
+            "monitor_phase_sequence": False,
+            "reverse": {"a": False, "b": False, "c": False},
+            "ct_type": "120A",
+            "alarms": {
+                phase: {"voltage": [None, None], "current": [None, None], "power": [None, None]}
+                for phase in "abc"
+            },
+        }
+
+    def shelly_get_config(self):
+        # Real shape per shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Sys/
+        # (Sys.GetConfig) aggregated into the whole-device Shelly.GetConfig response,
+        # with em:0/emdata:0 in place of a switch/input device's switch:N/input:N.
+        mac = self._identity["mac"]
+        fw_id = "20250101-000000/v%s" % FIRMWARE_VERSION
+        return {
+            "ble": {"enable": False},
+            "cloud": {"enable": False, "server": "iot.shelly.cloud:6012/jrpc"},
+            "eth": {"enable": True, "ipv4mode": "dhcp", "ip": None, "netmask": None,
+                   "gw": None, "nameserver": None},
+            "mqtt": {"enable": False, "server": None, "user": None, "pass": None},
+            "sys": {
+                "device": {
+                    "name": None,
+                    "mac": mac,
+                    "fw_id": fw_id,
+                    "eco_mode": False,
+                    "profile": "monophase",
+                    "discoverable": True,
+                    "tls_check_cert_validity_time": True,
+                    "enhanced_security": False,
+                },
+                "location": {"tz": None, "lat": None, "lon": None},
+                "debug": {"mqtt": {"enable": False}, "websocket": {"enable": False},
+                         "udp": {"addr": None}},
+                "ui_data": {},
+                "rpc_udp": {"dst_addr": None, "listen_port": None},
+                "sntp": {"server": "time.google.com"},
+                "cfg_rev": 1,
+            },
+            "wifi": {
+                "ap": {"ssid": None, "enable": False},
+                "sta": {"ssid": None, "enable": True, "ipv4mode": "dhcp"},
+                "sta1": {"ssid": None, "enable": False},
+                "roam": {"rssi_thr": -80, "interval": 60},
+            },
+            "em:0": self.em_get_config(),
+            "emdata:0": {"id": 0},
+        }
+
     def emdata_get_status(self):
         snap = self._reader.get_snapshot()
         total_act = snap.get("fwd_active_energy_wh") or 0.0
@@ -155,12 +214,16 @@ class ShellyDataMapper:
         return result
 
     def dispatch(self, method):
-        if method in ("EM.GetStatus", "EM.GetConfig"):
+        if method == "EM.GetStatus":
             return self.em_get_status()
+        if method == "EM.GetConfig":
+            return self.em_get_config()
         if method == "EMData.GetStatus":
             return self.emdata_get_status()
         if method in ("Shelly.GetDeviceInfo", "Shelly.GetStatus"):
             return self.device_info()
+        if method == "Shelly.GetConfig":
+            return self.shelly_get_config()
         return None
 
 

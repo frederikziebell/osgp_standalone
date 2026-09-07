@@ -136,6 +136,21 @@ class TestDataMapper(unittest.TestCase):
         self.assertIn("total_act", self.mapper.dispatch("EMData.GetStatus"))
         self.assertIn("model", self.mapper.dispatch("Shelly.GetDeviceInfo"))
 
+    def test_em_get_config_is_a_config_not_a_status(self):
+        # EM.GetConfig and EM.GetStatus are different real methods with different
+        # response shapes - previously both were wired to the status response.
+        config = self.mapper.dispatch("EM.GetConfig")
+        self.assertEqual(config["id"], 0)
+        self.assertIn("ct_type", config)
+        self.assertNotIn("total_act_power", config)
+
+    def test_shelly_get_config_includes_em_and_emdata_components(self):
+        config = self.mapper.dispatch("Shelly.GetConfig")
+        self.assertIn("sys", config)
+        self.assertEqual(config["sys"]["device"]["mac"], IDENTITY["mac"])
+        self.assertIn("em:0", config)
+        self.assertIn("emdata:0", config)
+
 
 class TestHttpServer(unittest.TestCase):
     @classmethod
