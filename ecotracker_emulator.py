@@ -43,6 +43,7 @@ from urllib.parse import urlsplit
 logger = logging.getLogger("EcoTrackerEmulator")
 
 ECOTRACKER_OUI = "B43A45"  # real everHome EcoTracker vendor MAC prefix
+ECOTRACKER_PRODUCT_ID = "1137"  # value an actual EcoTracker reports in its mDNS TXT record
 
 
 def _load_or_create_mac(path):
@@ -97,7 +98,11 @@ def _register_mdns(bind_address, port, mac):
         "%s._everhome._tcp.local." % instance_name,
         addresses=[socket.inet_aton(advertise_ip)],
         port=port,
-        properties={"serial": mac, "productid": "ECOTRACKER", "ip": advertise_ip},
+        # "1137" is not a made-up placeholder - it's the value an actual EcoTracker
+        # reports, per a working open-source emulator that captured it from real
+        # hardware. A made-up string here is a plausible reason discovery would
+        # silently filter this out even though the mDNS record itself is valid.
+        properties={"serial": mac, "productid": ECOTRACKER_PRODUCT_ID, "ip": advertise_ip},
         server="%s.local." % instance_name,
     )
     zc = Zeroconf()
@@ -138,6 +143,7 @@ class EcoTrackerDataMapper:
         return {
             "power": round(power),
             "powerAvg": round(power),  # no separate 1-minute average tracked; same value
+            "agePower": 0,  # staleness indicator (seconds); not tracked, 0 = "fresh"
             "powerPhase1": round(phase_powers[0]),
             "powerPhase2": round(phase_powers[1]),
             "powerPhase3": round(phase_powers[2]),
