@@ -118,6 +118,13 @@ def main():
     history_enabled = props.get("historyEnabled", "true").strip().lower() not in ("false", "0", "no")
     history_db_path = props.get("historyDbPath", "history.sqlite3").strip()
     history_sample_seconds = parse_int(props, "historySampleSeconds", 60)
+    # Opt-in, like Shelly emulation - makes this Pi answer as an everHome EcoTracker so
+    # apps that support pairing one as a generic "Smart CT" meter (e.g. Zendure's local
+    # Smart CT mode) can use this Pi's readings instead.
+    ecotracker_enabled = (props.get("ecotrackerEnabled", "false").strip().lower()
+                          not in ("false", "0", "no"))
+    ecotracker_bind = props.get("ecotrackerBind", "0.0.0.0").strip()
+    ecotracker_port = parse_int(props, "ecotrackerPort", 8082)
 
     logger.info("Starting Standalone Smart Meter Reader (config: %s)...", config_path)
 
@@ -156,6 +163,16 @@ def main():
             logger.error("Could not start dashboard web server on %s:%d: %s",
                         web_bind, web_port, e)
 
+    ecotracker_server = None
+    if ecotracker_enabled:
+        from ecotracker_emulator import EcoTrackerEmulatorServer
+        try:
+            ecotracker_server = EcoTrackerEmulatorServer(reader, ecotracker_bind, ecotracker_port)
+            ecotracker_server.start()
+        except OSError as e:
+            logger.error("Could not start EcoTracker emulator on %s:%d: %s",
+                        ecotracker_bind, ecotracker_port, e)
+
     try:
         reader.connect_and_run()
     finally:
@@ -163,6 +180,8 @@ def main():
             dashboard_server.stop()
         if history_logger is not None:
             history_logger.stop()
+        if ecotracker_server is not None:
+            ecotracker_server.stop()
 
 
 if __name__ == "__main__":
