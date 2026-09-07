@@ -163,6 +163,25 @@ class TestDataMapper(unittest.TestCase):
         self.assertEqual(self.mapper.dispatch("Cloud.GetStatus"), {"connected": True})
         self.assertTrue(self.mapper.dispatch("Shelly.GetConfig")["cloud"]["enable"])
 
+    def test_shelly_get_status_is_live_status_not_identity(self):
+        # Previously conflated with device_info() (the static /shelly identity blob) -
+        # a real Shelly.GetStatus is a live status aggregation instead, and the app
+        # plausibly used wifi.status/uptime from this to judge the device reachable.
+        status = self.mapper.dispatch("Shelly.GetStatus")
+        self.assertNotIn("model", status)  # that's device_info()'s shape, not this one
+        self.assertEqual(status["wifi"]["status"], "got ip")
+        self.assertIsInstance(status["sys"]["uptime"], int)
+        self.assertEqual(status["sys"]["mac"], IDENTITY["mac"])
+        self.assertIn("em:0", status)
+        self.assertIn("total_act_power", status["em:0"])
+        self.assertIn("emdata:0", status)
+
+    def test_shelly_get_device_info_is_still_the_identity_blob(self):
+        # Shelly.GetDeviceInfo must keep returning the identity shape - only
+        # Shelly.GetStatus's mapping changed.
+        info = self.mapper.dispatch("Shelly.GetDeviceInfo")
+        self.assertEqual(info["model"], se.MODEL)
+
 
 class TestHttpServer(unittest.TestCase):
     @classmethod

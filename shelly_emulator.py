@@ -27,7 +27,9 @@ import json
 import logging
 import os
 import random
+import socket
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
@@ -63,6 +65,20 @@ def _load_or_create_identity(path):
     return identity
 
 
+def _get_local_ip():
+    """Best-effort outbound local IP, for wifi.sta_ip/sys.mac-adjacent status fields -
+    a real device reports its actual address; a UDP 'connect' doesn't send packets,
+    just picks a route, so this is cheap and safe to call on every status request."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))
+        return s.getsockname()[0]
+    except OSError:
+        return "127.0.0.1"
+    finally:
+        s.close()
+
+
 def _split_by_current(total, currents):
     """Splits a combined reading across phases, weighted by each phase's share of
     total current - the closest approximation available without real per-phase power,
@@ -92,6 +108,7 @@ class ShellyDataMapper:
         # Shelly's cloud) - tracked locally just so a SetConfig the app just made is
         # reflected back consistently if it re-checks GetConfig/GetStatus afterward.
         self._cloud_enabled = False
+        self._start_time = time.time()  # for sys.uptime in Shelly.GetStatus
 
     def device_info(self):
         return {
@@ -199,6 +216,43 @@ class ShellyDataMapper:
             "emdata:0": {"id": 0},
         }
 
+    def shelly_get_status(self):
+        # Real shape per shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Shelly/
+        # (Shelly.GetStatus) - a live status aggregation, NOT the same thing as
+        # Shelly.GetDeviceInfo/"/shelly" (static identity). Previously conflated: this
+        # returned device_info() instead, missing wifi.status/cloud.connected/sys.uptime
+        # entirely - plausibly why the app couldn't tell the device was reachable, even
+        # though every other endpoint answered fine.
+        now = time.time()
+        local_ip = _get_local_ip()
+        return {
+            "ble": {},
+            "cloud": {"connected": False},  # never really connects - see Cloud.SetConfig
+            "eth": {"ip": None},
+            "mqtt": {"connected": False},
+            "sys": {
+                "mac": self._identity["mac"],
+                "restart_required": False,
+                "time": time.strftime("%H:%M", time.localtime(now)),
+                "unixtime": int(now),
+                "last_sync_ts": int(now),
+                "uptime": int(now - self._start_time),
+                "ram_size": 254744,
+                "ram_free": 151560,
+                "fs_size": 458752,
+                "fs_free": 180224,
+                "cfg_rev": 1,
+                "kvs_rev": 0,
+                "schedule_rev": 0,
+                "webhook_rev": 0,
+                "available_updates": {},
+            },
+            "wifi": {"sta_ip": local_ip, "status": "got ip", "ssid": None, "rssi": -50},
+            "ws": {"connected": False},
+            "em:0": self.em_get_status(),
+            "emdata:0": self.emdata_get_status(),
+        }
+
     def emdata_get_status(self):
         snap = self._reader.get_snapshot()
         total_act = snap.get("fwd_active_energy_wh") or 0.0
@@ -234,8 +288,10 @@ class ShellyDataMapper:
             return self.em_get_config()
         if method == "EMData.GetStatus":
             return self.emdata_get_status()
-        if method in ("Shelly.GetDeviceInfo", "Shelly.GetStatus"):
+        if method == "Shelly.GetDeviceInfo":
             return self.device_info()
+        if method == "Shelly.GetStatus":
+            return self.shelly_get_status()
         if method == "Shelly.GetConfig":
             return self.shelly_get_config()
         if method == "Cloud.GetStatus":
