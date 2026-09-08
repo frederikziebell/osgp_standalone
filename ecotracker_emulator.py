@@ -22,14 +22,29 @@ estimate, not a measurement, same caveat as before.
 Discoverability: apps that "discover" a Smart CT meter rather than take a manual IP
 (confirmed necessary - the plain HTTP endpoint alone isn't enough) rely on mDNS/DNS-SD:
 a service of type "_everhome._tcp" named "ecotracker-<MAC>", where real EcoTracker
-devices' MAC addresses start with the vendor OUI B4:3A:45 - matching that OUI, rather
-than a random locally-administered MAC, follows the convention used by the existing
-open-source EcoTracker emulators this was checked against (see README). This needs the
-'zeroconf' package (pip install zeroconf) - a small, well-established pure-Python mDNS
+devices' MAC addresses start with the vendor OUI B4:3A:45. This needs the 'zeroconf'
+package (pip install zeroconf) - a small, well-established pure-Python mDNS
 implementation - since hand-rolling raw mDNS/DNS-SD packet encoding from scratch would
 be a much bigger and more fragile undertaking than this one opt-in feature warrants.
 Only imported if EcoTracker emulation is actually enabled; the rest of this tool has no
 dependency beyond pyserial.
+
+Checked against, and several details (the OUI, the mDNS service/instance-name shape,
+and critically the "1137" productid TXT value, which is a real captured value rather
+than a guess) taken from: github.com/wwerther/ha-ecotracker-emulator - a Home Assistant
+custom component doing the same emulation, confirmed by its own README to work with an
+EcoFlow Stream Ultra X. Two things worth carrying over from its documented experience:
+
+  - It has NOT been confirmed against Zendure specifically, only EcoFlow. "Works for
+    EcoFlow" is not the same claim as "works for Zendure" - the everHome/Smart-CT
+    protocol is shared, but that doesn't guarantee every client app's own discovery/
+    verification logic behaves identically.
+  - Its own documented limitation: "EcoFlow app shows meter as offline/disconnected
+    unless the inverter actively polls it." I.e. even this confirmed-working reference
+    shows the exact same "offline" status in the app's UI until the paired Hub/inverter
+    actually starts requesting live data from it - a cosmetic status-screen quirk, not
+    evidence the emulation itself is broken. Worth remembering before treating "still
+    shows offline" as a signal something here needs fixing.
 """
 
 import json
@@ -46,25 +61,29 @@ ECOTRACKER_OUI = "B43A45"  # real everHome EcoTracker vendor MAC prefix
 ECOTRACKER_PRODUCT_ID = "1137"  # value an actual EcoTracker reports in its mDNS TXT record
 
 
-def _load_or_create_mac(path):
-    """A stable fake MAC using the real EcoTracker OUI (see module docstring),
-    persisted so re-pairing/re-discovery isn't needed after a restart."""
+def _load_or_create_identity(path):
+    """A stable fake MAC (real EcoTracker OUI + random suffix) and a separate serial
+    number - kept as two independent random values rather than reusing one for both,
+    matching wwerther/ha-ecotracker-emulator's own config flow (_random_mac_suffix()/
+    _random_serial()). Persisted so re-pairing/re-discovery isn't needed after a
+    restart."""
     try:
         with open(path) as f:
             data = json.load(f)
-            if "mac" in data:
-                return data["mac"]
+            if "mac" in data and "serial" in data:
+                return data
     except (OSError, ValueError):
         pass
     rng = random.SystemRandom()
-    suffix = "".join("%02X" % rng.randint(0, 255) for _ in range(3))
-    mac = ECOTRACKER_OUI + suffix
+    mac = ECOTRACKER_OUI + "".join("%02X" % rng.randint(0, 255) for _ in range(3))
+    serial = "".join("%02x" % rng.randint(0, 255) for _ in range(6))
+    identity = {"mac": mac, "serial": serial}
     try:
         with open(path, "w") as f:
-            json.dump({"mac": mac}, f)
+            json.dump(identity, f)
     except OSError as e:
         logger.warning("Could not persist EcoTracker identity to %s: %s", path, e)
-    return mac
+    return identity
 
 
 def _get_local_ip():
@@ -80,7 +99,7 @@ def _get_local_ip():
         s.close()
 
 
-def _register_mdns(bind_address, port, mac):
+def _register_mdns(bind_address, port, identity):
     try:
         from zeroconf import ServiceInfo, Zeroconf
     except ImportError:
@@ -91,6 +110,7 @@ def _register_mdns(bind_address, port, mac):
                      "this one without it.")
         return None
 
+    mac = identity["mac"]
     advertise_ip = bind_address if bind_address not in ("0.0.0.0", "::") else _get_local_ip()
     instance_name = "ecotracker-%s" % mac
     info = ServiceInfo(
@@ -99,10 +119,11 @@ def _register_mdns(bind_address, port, mac):
         addresses=[socket.inet_aton(advertise_ip)],
         port=port,
         # "1137" is not a made-up placeholder - it's the value an actual EcoTracker
-        # reports, per a working open-source emulator that captured it from real
+        # reports, per wwerther/ha-ecotracker-emulator, which captured it from real
         # hardware. A made-up string here is a plausible reason discovery would
         # silently filter this out even though the mDNS record itself is valid.
-        properties={"serial": mac, "productid": ECOTRACKER_PRODUCT_ID, "ip": advertise_ip},
+        properties={"serial": identity["serial"], "productid": ECOTRACKER_PRODUCT_ID,
+                   "ip": advertise_ip},
         server="%s.local." % instance_name,
     )
     zc = Zeroconf()
@@ -183,7 +204,7 @@ class EcoTrackerEmulatorServer:
         self._httpd.mapper = EcoTrackerDataMapper(reader)
         self._thread = threading.Thread(target=self._httpd.serve_forever,
                                         name="EcoTrackerEmulator", daemon=True)
-        self._mac = _load_or_create_mac(identity_path)
+        self._identity = _load_or_create_identity(identity_path)
         self._bind_address = bind_address
         self._zeroconf = None
 
@@ -191,7 +212,7 @@ class EcoTrackerEmulatorServer:
         self._thread.start()
         host, port = self._httpd.server_address[:2]
         logger.info("EcoTracker emulator listening on http://%s:%d/v1/json", host, port)
-        self._zeroconf = _register_mdns(self._bind_address, port, self._mac)
+        self._zeroconf = _register_mdns(self._bind_address, port, self._identity)
 
     def stop(self):
         if self._zeroconf is not None:

@@ -110,6 +110,39 @@ Two more stats round it out:
   extra group needed) if `vcgencmd` isn't usable, which only reports the current instant.
   Shows plain "power OK" until either signals a problem.
 
+## everHome EcoTracker emulation
+
+Some battery/inverter apps support pairing a generic "Smart CT" meter as their grid
+sensor — notably Zendure's app, whose Hub/AIO/Hyper "Smart CT mode" accepts an
+everHome EcoTracker over local Wi-Fi with no cloud account. That's the opposite of
+Zendure's Shelly integration (see `shelly_emulator.py` on the `shelly_emulation`
+branch), which turned out to require a real Shelly cloud account just to pair — this
+EcoTracker route was the fallback once that turned into a dead end. Setting
+`ecotrackerEnabled=true` makes this Pi answer as one instead, using the OSGP meter's
+readings.
+
+The plain HTTP endpoint (`GET /v1/json`) alone isn't enough — apps that "discover" a
+Smart CT meter rather than take a manual IP need it announced via mDNS
+(`_everhome._tcp`, needs `pip install zeroconf`), which took real reverse-engineering
+to get right: several details (the real EcoTracker vendor MAC prefix, the exact mDNS
+service/instance-name shape, and critically the `productid=1137` TXT value, which
+turned out to matter — a made-up placeholder there got silently filtered out even
+though the mDNS record was otherwise perfectly valid) came from
+[wwerther/ha-ecotracker-emulator](https://github.com/wwerther/ha-ecotracker-emulator),
+a Home Assistant custom component doing the same thing, confirmed by its own README to
+work with an EcoFlow Stream Ultra X.
+
+Two things worth knowing before troubleshooting further:
+- That reference has **not** been confirmed against Zendure specifically, only
+  EcoFlow — the underlying protocol is shared, but that doesn't guarantee every
+  client app's own verification logic behaves identically.
+- Its own documented limitation: *"EcoFlow app shows meter as offline/disconnected
+  unless the inverter actively polls it."* I.e. even that confirmed-working reference
+  shows the same "offline" status in the pairing app's UI until the paired Hub/inverter
+  actually starts requesting live data from it. A device still showing "offline" in a
+  settings screen isn't necessarily broken — it may just mean nothing's asked the Hub
+  to actually use it yet.
+
 ## Files
 
 | File | Ported from |
@@ -121,6 +154,7 @@ Two more stats round it out:
 | `dashboard.py` | new — LAN live-readings dashboard |
 | `history.py` | new — SQLite history logging, coarsening, and chart queries |
 | `sysinfo.py` | new — CPU load / memory / temperature stats for the dashboard |
+| `ecotracker_emulator.py` | new — everHome EcoTracker emulation for battery/inverter apps |
 | `service.sh` | new — systemd service install/start/stop/restart/uninstall |
 | `tests/` | new — see below |
 
