@@ -135,6 +135,7 @@ def main():
     shelly_mqtt_username = props.get("shellyMqttUsername", "").strip()
     shelly_mqtt_password = props.get("shellyMqttPassword", "").strip()
     shelly_mqtt_topic_prefix = props.get("shellyMqttTopicPrefix", "").strip() or None
+    shelly_mqtt_client_id = props.get("shellyMqttClientId", "").strip() or None
     shelly_mqtt_use_ssl = (props.get("shellyMqttUseSsl", "false").strip().lower()
                           not in ("false", "0", "no"))
     shelly_mqtt_notify_interval_seconds = parse_int(props, "shellyMqttNotifyIntervalSeconds", 5)
@@ -202,7 +203,8 @@ def main():
                 mapper, shelly_mqtt_server, shelly_mqtt_username or None,
                 shelly_mqtt_password or None, topic_prefix=shelly_mqtt_topic_prefix,
                 use_ssl=shelly_mqtt_use_ssl,
-                notify_interval_seconds=shelly_mqtt_notify_interval_seconds)
+                notify_interval_seconds=shelly_mqtt_notify_interval_seconds,
+                client_id=shelly_mqtt_client_id)
             shelly_mqtt_client.start()
 
     try:

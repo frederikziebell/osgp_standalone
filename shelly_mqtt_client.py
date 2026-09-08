@@ -51,7 +51,8 @@ class ShellyMqttClient:
     """Wraps a paho-mqtt client publishing/answering as the given ShellyDataMapper."""
 
     def __init__(self, mapper, server, username, password, topic_prefix=None,
-                use_ssl=False, notify_interval_seconds=DEFAULT_NOTIFY_INTERVAL_SECONDS):
+                use_ssl=False, notify_interval_seconds=DEFAULT_NOTIFY_INTERVAL_SECONDS,
+                client_id=None):
         self._mapper = mapper
         self._topic_prefix = topic_prefix or mapper.device_info()["id"]
         self._notify_interval = (notify_interval_seconds if notify_interval_seconds > 0
@@ -70,7 +71,16 @@ class ShellyMqttClient:
         host, _, port_str = server.partition(":")
         port = int(port_str) if port_str else (DEFAULT_PORT_TLS if use_ssl else DEFAULT_PORT_PLAIN)
 
-        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=self._topic_prefix)
+        # Many multi-tenant MQTT brokers (as used by cloud integrations like everHome)
+        # enforce that the MQTT client_id matches the authenticated username, for tenant
+        # isolation - and silently drop the connection right after CONNECT otherwise,
+        # without a proper CONNACK rejection (so on_connect never fires, only
+        # on_disconnect with a generic reason). Default to the username for that reason;
+        # topic_prefix is a separate, independently-configurable value used only for the
+        # actual pub/sub topic names, matching how a real Shelly's own MQTT settings
+        # distinguish "Client ID" from "Topic prefix".
+        effective_client_id = client_id or username or self._topic_prefix
+        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=effective_client_id)
         if username:
             client.username_pw_set(username, password)
         if use_ssl:

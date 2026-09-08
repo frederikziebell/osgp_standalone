@@ -207,6 +207,13 @@ whatever's issuing these per-device credentials) are commonly scoped to a specif
 prefix tied to the given username — set it to whatever the integration's own setup
 screen specifies, don't assume it matches this device's own generated id.
 
+The MQTT `client_id` matters separately from the topic prefix: it defaults to
+`shellyMqttUsername`, since multi-tenant brokers commonly require the client_id to
+match the authenticated username for tenant isolation and otherwise silently drop the
+connection right after CONNECT — no proper CONNACK rejection, so nothing shows up
+except a generic disconnect. Set `shellyMqttClientId` only if the integration's setup
+screen specifies a distinct client ID.
+
 Needs the `paho-mqtt` package (`pip install paho-mqtt`) — only if this feature is
 enabled, same as `zeroconf` for EcoTracker discovery; not a dependency of the rest of
 this tool. Verified end-to-end against a real public MQTT broker (connect, the full

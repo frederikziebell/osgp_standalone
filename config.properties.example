@@ -76,5 +76,10 @@ shellyMqttServer=everhome.cloud:1883
 shellyMqttUsername=
 shellyMqttPassword=
 shellyMqttTopicPrefix=
+# Defaults to shellyMqttUsername if left blank - many multi-tenant MQTT brokers (as used
+# by cloud integrations) require the client_id to match the authenticated username and
+# silently drop any other connection right after CONNECT. Only set this separately if
+# your integration's setup screen actually specifies its own client ID.
+shellyMqttClientId=
 shellyMqttUseSsl=false
 shellyMqttNotifyIntervalSeconds=5
