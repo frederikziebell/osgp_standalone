@@ -77,6 +77,8 @@ class ShellyMqttClient:
             client.tls_set()
         client.will_set("%s/online" % self._topic_prefix, payload="false", qos=1, retain=True)
         client.on_connect = self._on_connect
+        client.on_connect_fail = self._on_connect_fail
+        client.on_disconnect = self._on_disconnect
         client.on_message = self._on_message
         self._client = client
         self._host = host
@@ -85,6 +87,8 @@ class ShellyMqttClient:
     def start(self):
         if self._client is None:
             return
+        logger.info("Connecting to MQTT broker %s:%d as '%s'...",
+                   self._host, self._port, self._topic_prefix)
         self._client.connect_async(self._host, self._port, keepalive=60)
         self._client.loop_start()
         self._notify_thread = threading.Thread(target=self._notify_loop,
@@ -108,7 +112,8 @@ class ShellyMqttClient:
 
     def _on_connect(self, client, userdata, flags, reason_code, properties=None):
         if reason_code != 0:
-            logger.error("MQTT connect failed: %s", reason_code)
+            logger.error("MQTT connect rejected by broker %s:%d: %s",
+                        self._host, self._port, reason_code)
             return
         logger.info("Connected to MQTT broker %s:%d, publishing as '%s'",
                    self._host, self._port, self._topic_prefix)
@@ -117,6 +122,22 @@ class ShellyMqttClient:
         self._client.publish("%s/announce" % self._topic_prefix,
                              payload=json.dumps(self._mapper.device_info()), qos=1)
         self._client.subscribe("%s/rpc" % self._topic_prefix)
+
+    def _on_connect_fail(self, client, userdata):
+        # Called by paho itself when the TCP/TLS connection attempt fails outright (bad
+        # host, connection refused, timeout, ...) - distinct from _on_connect, which only
+        # fires once a CONNACK is actually received from the broker. Without this, a
+        # broken network path to the broker retries forever with no log output at all.
+        logger.error("Could not reach MQTT broker %s:%d (network/DNS/firewall problem?) "
+                    "- retrying in the background.", self._host, self._port)
+
+    def _on_disconnect(self, client, userdata, disconnect_flags=None, reason_code=None,
+                       properties=None):
+        if self._stop_requested.is_set():
+            return
+        logger.warning("Disconnected from MQTT broker %s:%d (reason: %s) - "
+                       "paho will retry in the background.",
+                       self._host, self._port, reason_code)
 
     def _on_message(self, client, userdata, msg):
         try:
