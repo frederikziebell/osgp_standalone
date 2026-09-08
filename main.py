@@ -126,6 +126,18 @@ def main():
     shelly_identity_path = props.get("shellyIdentityPath", "shelly_identity.json").strip()
     shelly_invert_power_sign = (props.get("shellyInvertPowerSign", "false").strip().lower()
                                 not in ("false", "0", "no"))
+    # Independent of the HTTP emulator above - for integrations (e.g. everHome) that add
+    # a "Shelly" device configured to connect outbound to *their own* MQTT broker,
+    # sidestepping both local discovery and Shelly's own cloud device-registration check.
+    shelly_mqtt_enabled = (props.get("shellyMqttEnabled", "false").strip().lower()
+                          not in ("false", "0", "no"))
+    shelly_mqtt_server = props.get("shellyMqttServer", "").strip()
+    shelly_mqtt_username = props.get("shellyMqttUsername", "").strip()
+    shelly_mqtt_password = props.get("shellyMqttPassword", "").strip()
+    shelly_mqtt_topic_prefix = props.get("shellyMqttTopicPrefix", "").strip() or None
+    shelly_mqtt_use_ssl = (props.get("shellyMqttUseSsl", "false").strip().lower()
+                          not in ("false", "0", "no"))
+    shelly_mqtt_notify_interval_seconds = parse_int(props, "shellyMqttNotifyIntervalSeconds", 5)
 
     logger.info("Starting Standalone Smart Meter Reader (config: %s)...", config_path)
 
@@ -176,6 +188,23 @@ def main():
             logger.error("Could not start Shelly emulator on %s:%d: %s",
                         shelly_bind, shelly_port, e)
 
+    shelly_mqtt_client = None
+    if shelly_mqtt_enabled:
+        if not shelly_mqtt_server:
+            logger.error("shellyMqttEnabled=true but shellyMqttServer is not set - "
+                        "not starting the MQTT client.")
+        else:
+            from shelly_emulator import ShellyDataMapper, _load_or_create_identity
+            from shelly_mqtt_client import ShellyMqttClient
+            identity = _load_or_create_identity(shelly_identity_path)
+            mapper = ShellyDataMapper(reader, identity, shelly_invert_power_sign)
+            shelly_mqtt_client = ShellyMqttClient(
+                mapper, shelly_mqtt_server, shelly_mqtt_username or None,
+                shelly_mqtt_password or None, topic_prefix=shelly_mqtt_topic_prefix,
+                use_ssl=shelly_mqtt_use_ssl,
+                notify_interval_seconds=shelly_mqtt_notify_interval_seconds)
+            shelly_mqtt_client.start()
+
     try:
         reader.connect_and_run()
     finally:
@@ -185,6 +214,8 @@ def main():
             history_logger.stop()
         if shelly_server is not None:
             shelly_server.stop()
+        if shelly_mqtt_client is not None:
+            shelly_mqtt_client.stop()
 
 
 if __name__ == "__main__":

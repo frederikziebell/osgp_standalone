@@ -61,3 +61,20 @@ shellyIdentityPath=shelly_identity.json
 # exactly this reason). We default to positive=importing. If your battery app's own
 # display shows import/export backwards once paired, flip this instead of the code.
 shellyInvertPowerSign=false
+
+# Shelly-over-MQTT - a second, independent way to expose the Shelly Pro 3EM emulation,
+# for integrations (e.g. everHome) that add a "Shelly" configured to connect outbound to
+# *their own* MQTT broker rather than being discovered locally. Sidesteps both the
+# local-discovery problems hit elsewhere in this project and Shelly's own cloud
+# device-registration check, since the broker here isn't Shelly's. Needs the
+# 'paho-mqtt' package (pip install paho-mqtt). Get the server/username/password from
+# the integration's own "add a Shelly" setup screen - shellyMqttTopicPrefix should
+# usually match whatever it specifies too (often tied to the username), not be left to
+# default to this device's own generated id.
+shellyMqttEnabled=false
+shellyMqttServer=everhome.cloud:1883
+shellyMqttUsername=
+shellyMqttPassword=
+shellyMqttTopicPrefix=
+shellyMqttUseSsl=false
+shellyMqttNotifyIntervalSeconds=5

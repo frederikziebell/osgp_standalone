@@ -173,6 +173,46 @@ discovery needed — comes from existing community projects doing the same thing
 [virtual_shelly3empro](https://github.com/jonasneustock/virtual_shelly3empro),
 [Energy2Shelly_ESP](https://github.com/TheRealMoeder/Energy2Shelly_ESP).
 
+### Shelly-over-MQTT (a second, independent way in)
+
+Some integrations don't discover a Shelly locally at all — instead their own app lets
+you add a "Shelly" device and hands you an MQTT username/password to paste into the
+Shelly's *own* MQTT settings, with a server address (e.g. everHome's app gives you
+`everhome.cloud:1883`). The device then connects *outward* to that broker, the same
+way a real Shelly does once configured with `Mqtt.SetConfig`. Setting
+`shellyMqttEnabled=true` makes this Pi behave the same way — connect to the given
+broker with the given credentials, and publish/respond exactly like a real device
+would (per shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Mqtt/ and
+.../General/RPCChannels/):
+
+- `<topic_prefix>/online` = `"true"`/`"false"` (retained), including on connect *and*
+  on a clean shutdown — plus a Last-Will-and-Testament so the broker itself publishes
+  `"false"` if the connection drops uncleanly. This is almost certainly how an
+  integration like this determines the device is "online," rather than anything
+  cloud-account-related — which is exactly why this route sidesteps both problems the
+  local-HTTP paths above ran into (Shelly's own cloud device-registration check, and
+  EcoTracker's BLE-first pairing on the `ecotracker_emulation` branch): the broker
+  here isn't Shelly's, there's no "is this real hardware" check to fail, and there's
+  no local discovery step to get wrong.
+- `<topic_prefix>/announce` once, with device identity.
+- `<topic_prefix>/events/rpc` periodically (`shellyMqttNotifyIntervalSeconds`), with a
+  `NotifyFullStatus` message carrying the same full status content as
+  `GET /rpc/Shelly.GetStatus`.
+- Subscribes to `<topic_prefix>/rpc` for incoming requests, answered via the exact same
+  data-mapping logic as the HTTP RPC endpoint (`ShellyDataMapper.dispatch()` — one
+  mapper, two transports), with the response published to `<src>/rpc`.
+
+`shellyMqttTopicPrefix` matters: a real broker's ACLs (including, presumably,
+whatever's issuing these per-device credentials) are commonly scoped to a specific
+prefix tied to the given username — set it to whatever the integration's own setup
+screen specifies, don't assume it matches this device's own generated id.
+
+Needs the `paho-mqtt` package (`pip install paho-mqtt`) — only if this feature is
+enabled, same as `zeroconf` for EcoTracker discovery; not a dependency of the rest of
+this tool. Verified end-to-end against a real public MQTT broker (connect, the full
+`online`/announce/notify/RPC-request-response cycle, and a clean-shutdown `"false"`)
+before ever touching a real integration's broker.
+
 ## Files
 
 | File | Ported from |
@@ -185,6 +225,7 @@ discovery needed — comes from existing community projects doing the same thing
 | `history.py` | new — SQLite history logging, coarsening, and chart queries |
 | `sysinfo.py` | new — CPU load / memory / temperature stats for the dashboard |
 | `shelly_emulator.py` | new — Shelly Pro 3EM emulation for battery/inverter apps |
+| `shelly_mqtt_client.py` | new — Shelly Pro 3EM emulation over outbound MQTT |
 | `service.sh` | new — systemd service install/start/stop/restart/uninstall |
 | `tests/` | new — see below |
 
@@ -242,7 +283,11 @@ bad CRC, multi-packet reassembly, both meter byte orders, the midnight-wrapping 
 window, and `.properties` parsing. `tests/test_history.py` covers the SQLite history
 logging, bucketed queries, and the year-coarsening logic the same way; `tests/test_shelly_emulator.py`
 covers the Shelly Pro 3EM data mapping (sign convention, per-phase estimation, identity
-persistence) and its HTTP endpoints.
+persistence) and its HTTP endpoints; `tests/test_shelly_mqtt_client.py` covers the MQTT
+transport's callbacks (connect/publish/subscribe, RPC request-response, the online/
+offline lifecycle) with the real `paho-mqtt` client's network calls mocked out, plus a
+graceful-degradation check for when the package isn't installed — both skip cleanly if
+`paho-mqtt` isn't present, same as `zeroconf` for the EcoTracker tests.
 
 Nothing runs these automatically on its own — there's no CI and no build step (this
 isn't a package with an install/build process; it's just scripts run directly). A
