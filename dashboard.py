@@ -135,7 +135,7 @@ DASHBOARD_HTML = """<!doctype html>
     border: 1px solid var(--border); border-radius: 6px; padding: 6px 12px; cursor: pointer;
   }
   .range-buttons button.active { color: var(--text); background: var(--page); border-color: var(--accent); }
-  .chart-svg-wrap { position: relative; }
+  .chart-svg-wrap { position: relative; touch-action: none; }
   .chart-svg-wrap svg { display: block; width: 100%; height: 260px; overflow: visible; }
   .chart-gridline { stroke: var(--border); stroke-width: 1; }
   .chart-axis-label { fill: var(--muted); font-size: 11px; }
@@ -531,7 +531,12 @@ function drawChart() {
 
   function pointerToIndex(clientX) {
     const rect = svg.getBoundingClientRect();
-    const frac = (clientX - rect.left) / rect.width;
+    // The plotted line only spans [padL, W-padR] in SVG user units (xScale's own output
+    // range), not the full [0, W] of the element - map against that same range, clamped,
+    // or the crosshair drifts away from the actual pointer position (worse the narrower
+    // the chart, since the axis-label margins are a bigger share of the total width).
+    const plotX = clientX - rect.left;
+    const frac = Math.max(0, Math.min(1, (plotX - padL) / (W - padL - padR)));
     const x = minX + (maxX - minX) * frac;
     let closest = 0, best = Infinity;
     for (let i = 0; i < points.length; i++) {
@@ -541,8 +546,8 @@ function drawChart() {
     return closest;
   }
 
-  hitRect.addEventListener("mousemove", (ev) => {
-    const i = pointerToIndex(ev.clientX);
+  function showCrosshairAt(clientX) {
+    const i = pointerToIndex(clientX);
     const p = points[i];
     const xPix = xScale(p.bucket_ts), yPix = yScale(p[metric.field]);
     crosshair.setAttribute("x1", xPix); crosshair.setAttribute("x2", xPix);
@@ -557,12 +562,34 @@ function drawChart() {
     tooltip.innerHTML = fmt(p[metric.field], metric.digits) + " " + metric.unit +
       '<br><span class="t-time">' + new Date(p.bucket_ts * 1000).toLocaleString() + "</span>";
     tooltip.hidden = false;
-  });
-  hitRect.addEventListener("mouseleave", () => {
+  }
+
+  function hideCrosshair() {
     crosshair.style.display = "none";
     dot.style.display = "none";
     tooltip.hidden = true;
-  });
+  }
+
+  hitRect.addEventListener("mousemove", (ev) => showCrosshairAt(ev.clientX));
+  hitRect.addEventListener("mouseleave", hideCrosshair);
+
+  // Touch: without these, a horizontal drag over the chart gets claimed by the browser
+  // as a page-scroll/pan gesture (nothing here to preventDefault on), so only a single
+  // stationary tap ever registered - no dragging-to-scrub like on desktop. preventDefault
+  // stops that gesture from taking over; { passive: false } is required for
+  // preventDefault to have any effect on a touch listener. touch-action: none on
+  // .chart-svg-wrap (above) reinforces the same intent declaratively, since some browsers
+  // decide "is this a scroll" before JS gets a chance to run.
+  hitRect.addEventListener("touchstart", (ev) => {
+    showCrosshairAt(ev.touches[0].clientX);
+    ev.preventDefault();
+  }, { passive: false });
+  hitRect.addEventListener("touchmove", (ev) => {
+    showCrosshairAt(ev.touches[0].clientX);
+    ev.preventDefault();
+  }, { passive: false });
+  hitRect.addEventListener("touchend", hideCrosshair);
+  hitRect.addEventListener("touchcancel", hideCrosshair);
 }
 
 metricSelect.addEventListener("change", drawChart);
