@@ -285,6 +285,9 @@ setInterval(poll, 2000);
 
 const TEMP_WARN_C = 70, TEMP_CRIT_C = 80;
 const MEM_WARN_PCT = 85, MEM_CRIT_PCT = 95;
+// dBm is negative - less negative is a better signal, so the "warn/crit" thresholds
+// below are ceilings a *weakening* signal falls past, not floors it rises past.
+const WIFI_WARN_DBM = -70, WIFI_CRIT_DBM = -80;
 
 function severityClass(value, warnAt, critAt) {
   if (value === null || value === undefined) return "";
@@ -328,6 +331,12 @@ async function pollSystem() {
   if (data.mem_percent !== null && data.mem_percent !== undefined) {
     const cls = severityClass(data.mem_percent, MEM_WARN_PCT, MEM_CRIT_PCT);
     parts.push(`<span class="${cls}">mem ${Math.round(data.mem_percent)}%</span>`);
+  }
+  if (data.wifi_signal_dbm !== null && data.wifi_signal_dbm !== undefined) {
+    let cls = "";
+    if (data.wifi_signal_dbm <= WIFI_CRIT_DBM) cls = "stat-critical";
+    else if (data.wifi_signal_dbm <= WIFI_WARN_DBM) cls = "stat-warning";
+    parts.push(`<span class="${cls}">WiFi ${Math.round(data.wifi_signal_dbm)} dBm</span>`);
   }
   if (data.db_bytes !== null && data.db_bytes !== undefined) {
     parts.push(`db ${formatBytes(data.db_bytes)}`);

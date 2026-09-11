@@ -97,8 +97,11 @@ grey. No dependency beyond the standard library: reads `/proc/meminfo`,
 `os.getloadavg()`, and `/sys/class/thermal/thermal_zone*/temp` (Linux/Raspberry Pi OS
 only).
 
-Two more stats round it out:
+A few more stats round it out:
 
+- **WiFi signal** — shown as dBm (e.g. `WiFi -52 dBm`), read from `/proc/net/wireless`;
+  omitted entirely on a wired connection, since that file simply has no data for an
+  interface that isn't wireless. Turns orange below -70 dBm, red below -80 dBm.
 - **`db`** — the size of the history SQLite file on disk, so you can see storage growth
   (and confirm the yearly coarsening described above is actually keeping it bounded).
 - **Power supply status** — the Pi firmware only ever detects *under*-voltage (there's

@@ -47,6 +47,35 @@ def _read_load_average():
         return None
 
 
+def _read_wifi_signal_dbm():
+    # /proc/net/wireless is stdlib-free and needs no extra permissions, unlike iwconfig/iw.
+    # Format (fields after the interface name): status, link quality, signal level (dBm),
+    # noise level, then packet-discard counters - each numeric field has a trailing "."
+    # baked into the kernel's own formatting, not a decimal point.
+    try:
+        with open("/proc/net/wireless") as f:
+            lines = f.readlines()[2:]  # first two lines are a fixed header
+    except OSError:
+        return None
+    fallback = None
+    for line in lines:
+        iface, sep, data = line.partition(":")
+        if not sep:
+            continue
+        fields = data.split()
+        if len(fields) < 3:
+            continue
+        try:
+            level_dbm = float(fields[2].rstrip("."))
+        except ValueError:
+            continue
+        if iface.strip().startswith("wl"):
+            return level_dbm
+        if fallback is None:
+            fallback = level_dbm
+    return fallback
+
+
 def _read_db_size_bytes(db_path):
     if not db_path:
         return None
@@ -115,6 +144,7 @@ def get_system_stats(db_path=None):
         "cpu_count": os.cpu_count(),
         "mem_percent": _read_memory_percent(),
         "temp_c": _read_temp_c(),
+        "wifi_signal_dbm": _read_wifi_signal_dbm(),
         "db_bytes": _read_db_size_bytes(db_path),
         "power": _read_power_status(),
     }
