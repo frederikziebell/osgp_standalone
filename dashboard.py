@@ -334,7 +334,7 @@ async function pollSystem() {
   }
   if (data.mem_percent !== null && data.mem_percent !== undefined) {
     const cls = severityClass(data.mem_percent, MEM_WARN_PCT, MEM_CRIT_PCT);
-    parts.push(`<span class="${cls}">mem ${Math.round(data.mem_percent)}%</span>`);
+    parts.push(`<span class="${cls}">MEM ${Math.round(data.mem_percent)}%</span>`);
   }
   if (data.wifi_signal_dbm !== null && data.wifi_signal_dbm !== undefined) {
     let cls = "";
@@ -343,17 +343,17 @@ async function pollSystem() {
     parts.push(`<span class="${cls}">WiFi ${Math.round(data.wifi_signal_dbm)} dBm</span>`);
   }
   if (data.db_bytes !== null && data.db_bytes !== undefined) {
-    parts.push(`db ${formatBytes(data.db_bytes)}`);
+    parts.push(`DB ${formatBytes(data.db_bytes)}`);
   }
   if (data.power) {
     const p = data.power;
-    let cls = "", label = "power OK";
+    let cls = "", label = "PWR OK";
     if (p.undervoltage_now || p.throttled_now) {
       cls = "stat-critical";
-      label = "power " + (p.undervoltage_now ? "undervoltage" : "throttled") + " now";
+      label = "PWR " + (p.undervoltage_now ? "undervoltage" : "throttled") + " now";
     } else if (p.undervoltage_ever || p.throttled_ever) {
       cls = "stat-warning";
-      label = "power issue since boot";
+      label = "PWR issue since boot";
     }
     parts.push(`<span class="${cls}">${label}</span>`);
   }
