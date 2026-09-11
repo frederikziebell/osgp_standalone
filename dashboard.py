@@ -297,11 +297,15 @@ function severityClass(value, warnAt, critAt) {
 }
 
 function formatBytes(bytes) {
-  if (bytes < 1024) return bytes + " B";
+  if (bytes < 1024) return Math.round(bytes) + " B";
   const units = ["KB", "MB", "GB"];
   let value = bytes / 1024, i = 0;
   while (value >= 1024 && i < units.length - 1) { value /= 1024; i++; }
-  return value.toFixed(1) + " " + units[i];
+  let rounded = Math.round(value);
+  // Rounding can itself push a value like 1023.6 up to 1024 - right at the threshold
+  // where it should already read as the next unit ("1 MB", not "1024 KB").
+  if (rounded >= 1024 && i < units.length - 1) { i++; rounded = Math.round(rounded / 1024); }
+  return rounded + " " + units[i];
 }
 
 async function pollSystem() {
