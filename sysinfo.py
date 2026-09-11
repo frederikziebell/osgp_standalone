@@ -47,6 +47,31 @@ def _read_load_average():
         return None
 
 
+def _read_default_route_iface():
+    # /proc/net/route: header line, then one row per route, destination in hex ("00000000"
+    # is the default route - "the rest of the internet", not a specific subnet). If more
+    # than one default route exists (e.g. both an onboard and a USB WiFi adapter connected
+    # at once), the kernel actually uses the one with the lowest metric, so prefer that one
+    # rather than just the first row.
+    try:
+        with open("/proc/net/route") as f:
+            lines = f.readlines()[1:]
+    except OSError:
+        return None
+    best_iface, best_metric = None, None
+    for line in lines:
+        fields = line.split()
+        if len(fields) < 7 or fields[1] != "00000000":
+            continue
+        try:
+            metric = int(fields[6])
+        except ValueError:
+            metric = 0
+        if best_metric is None or metric < best_metric:
+            best_iface, best_metric = fields[0], metric
+    return best_iface
+
+
 def _read_wifi_signal_dbm():
     # /proc/net/wireless is stdlib-free and needs no extra permissions, unlike iwconfig/iw.
     # Format (fields after the interface name): status, link quality, signal level (dBm),
@@ -57,7 +82,7 @@ def _read_wifi_signal_dbm():
             lines = f.readlines()[2:]  # first two lines are a fixed header
     except OSError:
         return None
-    fallback = None
+    entries = {}
     for line in lines:
         iface, sep, data = line.partition(":")
         if not sep:
@@ -66,14 +91,26 @@ def _read_wifi_signal_dbm():
         if len(fields) < 3:
             continue
         try:
-            level_dbm = float(fields[2].rstrip("."))
+            entries[iface.strip()] = float(fields[2].rstrip("."))
         except ValueError:
             continue
-        if iface.strip().startswith("wl"):
+
+    # Prefer whichever interface is actually carrying traffic right now (the default
+    # route), not just the first WiFi interface the kernel happens to list - with two
+    # WiFi adapters (e.g. an onboard chip plus a USB one added for better reception),
+    # the idle one could otherwise get reported forever. This also correctly shows no
+    # WiFi reading at all when the active connection turns out to be wired, even if an
+    # unused WiFi interface is still technically up.
+    default_iface = _read_default_route_iface()
+    if default_iface is not None:
+        return entries.get(default_iface)
+
+    # Couldn't tell which interface is active (e.g. /proc/net/route unreadable) - best
+    # effort, same as before: any interface that looks like WiFi, else whatever's there.
+    for iface, level_dbm in entries.items():
+        if iface.startswith("wl"):
             return level_dbm
-        if fallback is None:
-            fallback = level_dbm
-    return fallback
+    return next(iter(entries.values()), None)
 
 
 def _read_db_size_bytes(db_path):

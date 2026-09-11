@@ -99,9 +99,12 @@ only).
 
 A few more stats round it out:
 
-- **WiFi signal** — shown as dBm (e.g. `WiFi -52 dBm`), read from `/proc/net/wireless`;
-  omitted entirely on a wired connection, since that file simply has no data for an
-  interface that isn't wireless. Turns orange below -70 dBm, red below -80 dBm.
+- **WiFi signal** — shown as dBm (e.g. `WiFi -52 dBm`), read from `/proc/net/wireless`
+  for whichever interface is actually carrying the default route (via
+  `/proc/net/route`), not just the first WiFi interface the kernel happens to list —
+  matters if you ever have two at once (e.g. an onboard chip plus a USB adapter added
+  for better reception), so a still-up-but-idle interface can't get reported forever.
+  Omitted entirely on a wired connection. Turns orange below -70 dBm, red below -80 dBm.
 - **`db`** — the size of the history SQLite file on disk, so you can see storage growth
   (and confirm the yearly coarsening described above is actually keeping it bounded).
 - **Power supply status** — the Pi firmware only ever detects *under*-voltage (there's
